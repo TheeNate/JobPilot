@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertJobSchema, insertRequestLogSchema } from "@shared/schema";
 import { logger } from "./services/logger";
+import { EmailParser } from "./services/parser";
 import { z } from "zod";
 
 // Email payload schema for job intake
@@ -49,11 +50,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         subject: emailData.subject,
       });
       
-      // Create job record
+      // Parse job details from email body
+      const parsedJobDetails = EmailParser.parseJobDetails(
+        emailData["body-plain"], 
+        emailData.subject
+      );
+      
+      // Create job record with parsed data
       const jobData = {
         clientEmail: emailData.from,
         subject: emailData.subject,
         bodyPlain: emailData["body-plain"],
+        location: parsedJobDetails.location || null,
+        scheduledDate: parsedJobDetails.scheduledDate || null,
+        scheduledTime: parsedJobDetails.scheduledTime || null,
+        jobType: parsedJobDetails.jobType || null,
+        techsNeeded: parsedJobDetails.techsNeeded || null,
         status: "pending" as const,
       };
       
