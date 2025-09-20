@@ -1,10 +1,12 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertJobSchema, insertRequestLogSchema } from "@shared/schema";
+import { insertJobSchema, insertRequestLogSchema, jobs, jobAssignments } from "@shared/schema";
 import { logger } from "./services/logger";
 import { EmailParser } from "./services/parser";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
+import { db } from "./db";
 
 // Email payload schema for job intake
 const emailPayloadSchema = z.object({
@@ -165,6 +167,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         status: "error",
         message: "Failed to fetch stats",
+      });
+    }
+  });
+
+  // Delete job endpoint
+  app.delete("/api/jobs/:jobId", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const { jobId } = req.params;
+      
+      if (!jobId) {
+        return res.status(400).json({
+          status: "error",
+          message: "Job ID is required"
+        });
+      }
+      
+      // First delete any job assignments (cascade delete)
+      await db.delete(jobAssignments).where(eq(jobAssignments.jobId, jobId));
+      
+      // Then delete the job
+      const deletedJob = await db.delete(jobs).where(eq(jobs.id, jobId)).returning();
+      
+      if (deletedJob.length === 0) {
+        return res.status(404).json({
+          status: "error", 
+          message: "Job not found"
+        });
+      }
+      
+      // Log the request
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "DELETE",
+        endpoint: `/api/jobs/${jobId}`,
+        statusCode: 200,
+        responseTime,
+        requestBody: null,
+      });
+      
+      logger.info("Job deleted successfully", { jobId, responseTime });
+      
+      res.json({
+        status: "success",
+        message: "Job deleted successfully",
+        deletedJobId: jobId
+      });
+      
+    } catch (error) {
+      logger.error("Failed to delete job", { error, jobId: req.params.jobId });
+      res.status(500).json({
+        status: "error",
+        message: "Failed to delete job"
       });
     }
   });
