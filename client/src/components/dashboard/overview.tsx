@@ -2,23 +2,46 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Activity, Briefcase, Clock, Database, Server } from "lucide-react";
 
+interface HealthResponse {
+  status: string;
+  timestamp: string;
+  database: string;
+  uptime: number;
+}
+
+interface StatsResponse {
+  jobsToday: number;
+  jobsGrowth: number;
+  averageResponseTime: number;
+}
+
+interface LogEntry {
+  id: string;
+  method: string;
+  endpoint: string;
+  statusCode: number;
+  responseTime: number;
+  requestBody: string;
+  timestamp: string;
+}
+
 export function Overview() {
-  const { data: stats } = useQuery({
+  const { data: stats } = useQuery<StatsResponse>({
     queryKey: ["/api/stats"],
     refetchInterval: 5000, // Refresh every 5 seconds
   });
 
-  const { data: health } = useQuery({
+  const { data: health } = useQuery<HealthResponse>({
     queryKey: ["/api/health"],
     refetchInterval: 10000, // Refresh every 10 seconds
   });
 
-  const { data: logs } = useQuery({
+  const { data: logs } = useQuery<LogEntry[]>({
     queryKey: ["/api/logs"],
     refetchInterval: 3000, // Refresh every 3 seconds
   });
 
-  const recentActivity = logs?.slice(0, 5) || [];
+  const recentActivity = Array.isArray(logs) ? logs.slice(0, 5) : [];
 
   return (
     <div>
@@ -92,7 +115,7 @@ export function Overview() {
         <CardContent>
           <div className="space-y-3">
             {recentActivity.length > 0 ? (
-              recentActivity.map((log, index) => (
+              recentActivity.map((log: LogEntry, index: number) => (
                 <div 
                   key={index}
                   className="flex items-center justify-between py-3 border-b border-border last:border-b-0"

@@ -41,6 +41,10 @@ const tabData = {
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabType>("overview");
 
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab as TabType);
+  };
+
   const renderTabContent = () => {
     switch (activeTab) {
       case "overview":
@@ -62,7 +66,7 @@ export default function Dashboard() {
 
   return (
     <div className="flex h-screen bg-background text-foreground">
-      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
+      <Sidebar activeTab={activeTab} onTabChange={handleTabChange} />
       
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
