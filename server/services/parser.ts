@@ -19,10 +19,12 @@ export class EmailParser {
     try {
       // Parse client/location - enhanced patterns for company names and facilities
       const locationPatterns = [
-        /(?:at|@)\s+([A-Za-z]+(?:\s+[A-Za-z]+)*(?:\s+(?:Refinery|Plant|Site|Facility|Center|Building|Complex|Terminal|Station|Factory|Depot|Yard)(?:\s+\w+)?)?)/i,
-        /(?:location|site|facility|plant|client)[:\s]+([A-Za-z]+(?:\s+[A-Za-z]+)*)/i,
-        /(?:we|you)\s+need.+?(?:at|@)\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)/i,
-        /(?:Chevron|Shell|BP|Exxon|Total|Mobil|Phillips|Marathon|Valero|Conoco|Citgo|Sunoco)(?:\s+[A-Za-z]+)*/i
+        // Allow digits, hyphens, ampersands, and multiple facility segments
+        /(?:at|@)\s+([A-Za-z0-9&\-\s]+?)(?=\s+(?:on|for)\b|[.,;]|$)/i,
+        /(?:at|@)\s+([A-Za-z0-9&\-]+(?:\s+[A-Za-z0-9&\-]+)*(?:\s+(?:Refinery|Plant|Site|Facility|Center|Building|Complex|Terminal|Station|Factory|Depot|Yard)(?:\s+[A-Za-z0-9&\-]+)*)?)/i,
+        /(?:location|site|facility|plant|client)[:\s]+([A-Za-z0-9&\-]+(?:\s+[A-Za-z0-9&\-]+)*)/i,
+        /(?:we|you)\s+need.+?(?:at|@)\s+([A-Za-z0-9&\-]+(?:\s+[A-Za-z0-9&\-]+)*)/i,
+        /(?:Chevron|Shell|BP|Exxon|Total|Mobil|Phillips|Marathon|Valero|Conoco|Citgo|Sunoco)(?:\s+[A-Za-z0-9&\-]+)*/i
       ];
       
       for (const pattern of locationPatterns) {
@@ -90,12 +92,17 @@ export class EmailParser {
         }
       }
       
-      // Parse job type - enhanced patterns for various job types
+      // Parse job type - enhanced patterns for various job types (most specific first)
       const jobTypePatterns = [
+        // First try comprehensive phrase patterns (most specific)
+        /(?:for\s+(?:a\s+)?)(rope access\s+(?:ut|rt|mt|pt|vt|ndt)?\s*(?:inspection|testing|examination))/i,
+        /(?:for\s+(?:a\s+)?)((?:pipe\s+)?welding|piping|pipeline|structural)\s*(?:inspection|testing|examination)/i,
+        /(?:for\s+(?:a\s+)?)(radiographic|magnetic\s+particle|liquid\s+penetrant|visual|ultrasonic|ndt)\s*(?:inspection|testing)/i,
         /(?:for\s+(?:a\s+)?)((?:rope access\s+)?(?:UT|ultrasonic|NDT|non-destructive|radiographic|magnetic particle|liquid penetrant|visual)\s+(?:testing|inspection|examination))/i,
         /(?:for\s+(?:a\s+)?)((?:welding|piping|structural|mechanical|electrical|maintenance|repair|installation|commissioning)\s+(?:work|inspection|service|repair))/i,
         /(?:for\s+(?:a\s+)?)(rope access\s+[A-Za-z\s]+)/i,
-        /(NDT|UT|ultrasonic|radiographic|RT|MT|magnetic particle|PT|liquid penetrant|VT|visual testing)/i,
+        // Job codes with word boundaries (avoid matching inside words like "certified")
+        /\b(NDT|UT|RT|MT|PT|VT|API|ASME)\b/i,
         /(welding|pipe welding|structural welding|maintenance|repair|installation|commissioning|inspection)/i,
       ];
       

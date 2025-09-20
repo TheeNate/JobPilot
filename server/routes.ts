@@ -95,12 +95,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
     } catch (error) {
       const responseTime = Date.now() - startTime;
+      const isValidationError = error instanceof z.ZodError;
+      const statusCode = isValidationError ? 400 : 500;
       
-      // Log error request
+      // Log error request with correct status code
       await storage.createRequestLog({
         method: "POST",
         endpoint: "/api/job-intake",
-        statusCode: 400,
+        statusCode,
         responseTime,
         requestBody: JSON.stringify(req.body),
       });
@@ -110,7 +112,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responseTime,
       });
       
-      if (error instanceof z.ZodError) {
+      if (isValidationError) {
         res.status(400).json({
           status: "error",
           message: "Invalid request payload",
