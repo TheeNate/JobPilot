@@ -122,7 +122,9 @@ export function Overview() {
                 >
                   <div className="flex items-center">
                     <div className="w-2 h-2 bg-green-500 rounded-full mr-3"></div>
-                    <span className="text-foreground">{log.message}</span>
+                    <span className="text-foreground">
+                      {log.method} {log.endpoint} - {log.statusCode} - {log.responseTime}ms
+                    </span>
                   </div>
                   <span className="text-muted-foreground text-sm">
                     {new Date(log.timestamp).toLocaleTimeString()}

@@ -5,7 +5,7 @@ import {
   type RequestLog, type InsertRequestLog
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, count, avg, gte, and } from "drizzle-orm";
+import { eq, desc, count, avg, gte, and, lt } from "drizzle-orm";
 
 // Storage interface definition
 export interface IStorage {
@@ -115,7 +115,7 @@ export class DatabaseStorage implements IStorage {
       .from(jobs)
       .where(and(
         gte(jobs.createdAt, yesterday),
-        gte(today, jobs.createdAt)
+        lt(jobs.createdAt, today)
       ));
 
     // Average response time
