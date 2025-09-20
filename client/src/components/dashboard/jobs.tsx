@@ -1,9 +1,11 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RefreshCw, Briefcase, Clock, MapPin, User } from "lucide-react";
+import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2 } from "lucide-react";
 import { format } from "date-fns";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface Job {
   id: string;
@@ -22,11 +24,50 @@ interface Job {
 
 export function Jobs() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: jobs, isLoading, error, refetch } = useQuery<Job[]>({
     queryKey: ["/api/jobs"],
     refetchInterval: 5000, // Refresh every 5 seconds
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      const response = await fetch(`/api/jobs/${jobId}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Failed to delete job");
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      toast({
+        title: "Job deleted",
+        description: "The job request has been successfully deleted.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Delete failed",
+        description: error.message || "Failed to delete job request.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleDelete = async (jobId: string, clientEmail: string) => {
+    if (window.confirm(`Are you sure you want to delete the job request from ${clientEmail}? This action cannot be undone.`)) {
+      deleteMutation.mutate(jobId);
+    }
+  };
 
   const handleRefresh = () => {
     refetch();
@@ -183,6 +224,7 @@ export function Jobs() {
                     <TableHead className="w-[150px]">Job Type</TableHead>
                     <TableHead className="w-[80px] text-center">Techs</TableHead>
                     <TableHead className="w-[100px]">Status</TableHead>
+                    <TableHead className="w-[80px] text-center">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -250,6 +292,18 @@ export function Jobs() {
                         >
                           {job.status}
                         </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete(job.id, job.clientEmail)}
+                          disabled={deleteMutation.isPending}
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                          data-testid={`button-delete-${job.id}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
