@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -342,7 +342,8 @@ export function Jobs() {
                 </TableHeader>
                 <TableBody>
                   {jobs?.map((job) => (
-                    <TableRow key={job.id} data-testid={`row-job-${job.id}`}>
+                    <Fragment key={job.id}>
+                      <TableRow data-testid={`row-job-${job.id}`}>
                       <TableCell className="text-sm">
                         <div className="flex flex-col">
                           <span data-testid={`text-timestamp-${job.id}`}>
@@ -601,6 +602,7 @@ export function Jobs() {
                         </TableCell>
                       </TableRow>
                     )}
+                    </Fragment>
                   ))}
                 </TableBody>
               </Table>
