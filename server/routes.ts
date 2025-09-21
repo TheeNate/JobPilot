@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertJobSchema, insertRequestLogSchema, insertConnectedServiceSchema, insertServiceEnvironmentVariableSchema, jobs, jobAssignments } from "@shared/schema";
+import { insertJobSchema, insertRequestLogSchema, insertConnectedServiceSchema, insertServiceEnvironmentVariableSchema, insertEmployeeSchema, jobs, jobAssignments } from "@shared/schema";
 import { logger } from "./services/logger";
 import { EmailParser } from "./services/parser";
 import { z } from "zod";
@@ -768,6 +768,171 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         status: "error",
         message: "Failed to sync environment variables",
+      });
+    }
+  });
+
+  // Employee Management Endpoints
+  
+  // Get all employees
+  app.get("/api/employees", async (req, res) => {
+    try {
+      const employees = await storage.getEmployees();
+      res.json(employees);
+    } catch (error) {
+      logger.error("Failed to fetch employees", { error });
+      res.status(500).json({
+        status: "error",
+        message: "Failed to fetch employees",
+      });
+    }
+  });
+
+  // Create new employee
+  app.post("/api/employees", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const employeeData = insertEmployeeSchema.parse(req.body);
+      const employee = await storage.createEmployee(employeeData);
+      
+      // Log the request
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: "/api/employees",
+        statusCode: 201,
+        responseTime,
+        requestBody: JSON.stringify({ 
+          name: employeeData.name, 
+          email: employeeData.email 
+        }),
+      });
+      
+      logger.info("Employee created", { employeeId: employee.id });
+      
+      res.status(201).json({
+        status: "success",
+        employee,
+      });
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      const isValidationError = error instanceof z.ZodError;
+      const statusCode = isValidationError ? 400 : 500;
+      
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: "/api/employees",
+        statusCode,
+        responseTime,
+        requestBody: JSON.stringify({ 
+          name: req.body?.name, 
+          email: req.body?.email 
+        }),
+      });
+      
+      logger.error("Failed to create employee", { error });
+      
+      if (isValidationError) {
+        res.status(400).json({
+          status: "error",
+          message: "Invalid employee data",
+          errors: error.errors,
+        });
+      } else {
+        res.status(500).json({
+          status: "error",
+          message: "Failed to create employee",
+        });
+      }
+    }
+  });
+
+  // Get available employees
+  app.get("/api/employees/available", async (req, res) => {
+    try {
+      const employees = await storage.getAvailableEmployees();
+      res.json(employees);
+    } catch (error) {
+      logger.error("Failed to fetch available employees", { error });
+      res.status(500).json({
+        status: "error",
+        message: "Failed to fetch available employees",
+      });
+    }
+  });
+
+  // Find matching technicians for a job
+  app.post("/api/jobs/:id/find-technicians", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const { id: jobId } = req.params;
+      
+      // Get the job details first
+      const jobs = await storage.getRecentJobs(100);
+      const job = jobs.find(j => j.id === jobId);
+      
+      if (!job) {
+        return res.status(404).json({
+          status: "error",
+          message: "Job not found",
+        });
+      }
+      
+      // Extract job requirements for matching
+      const jobRequirements = {
+        jobType: job.jobType || undefined,
+        skills: job.jobType ? [job.jobType] : [],
+        techsNeeded: job.techsNeeded || 5,
+      };
+      
+      // Find matching technicians
+      const matchingTechnicians = await storage.findMatchingTechnicians(jobRequirements);
+      
+      // Log the request
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: `/api/jobs/${jobId}/find-technicians`,
+        statusCode: 200,
+        responseTime,
+        requestBody: JSON.stringify({ jobRequirements }),
+      });
+      
+      logger.info("Technician matching completed", { 
+        jobId, 
+        jobType: job.jobType,
+        matchedCount: matchingTechnicians.length 
+      });
+      
+      res.json({
+        status: "success",
+        job: {
+          id: job.id,
+          clientEmail: job.clientEmail,
+          location: job.location,
+          jobType: job.jobType,
+          techsNeeded: job.techsNeeded,
+        },
+        matchingTechnicians,
+        totalMatches: matchingTechnicians.length,
+      });
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: `/api/jobs/${req.params.id}/find-technicians`,
+        statusCode: 500,
+        responseTime,
+        requestBody: null,
+      });
+      
+      logger.error("Failed to find matching technicians", { error });
+      res.status(500).json({
+        status: "error",
+        message: "Failed to find matching technicians",
       });
     }
   });

@@ -1,10 +1,11 @@
 import { 
-  users, jobs, requestLogs, connectedServices, serviceEnvironmentVariables,
+  users, jobs, requestLogs, connectedServices, serviceEnvironmentVariables, employees,
   type User, type InsertUser, 
   type Job, type InsertJob,
   type RequestLog, type InsertRequestLog,
   type ConnectedService, type InsertConnectedService,
-  type ServiceEnvironmentVariable, type InsertServiceEnvironmentVariable
+  type ServiceEnvironmentVariable, type InsertServiceEnvironmentVariable,
+  type Employee, type InsertEmployee
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, count, avg, gte, and, lt } from "drizzle-orm";
@@ -36,6 +37,12 @@ export interface IStorage {
   updateServiceEnvironmentVariable(id: string, updates: Partial<InsertServiceEnvironmentVariable>): Promise<ServiceEnvironmentVariable>;
   deleteServiceEnvironmentVariable(id: string): Promise<void>;
   syncEnvironmentVariablesForService(serviceId: string, serviceType: string): Promise<ServiceEnvironmentVariable[]>;
+  
+  // Employee methods
+  createEmployee(employee: InsertEmployee): Promise<Employee>;
+  getEmployees(): Promise<Employee[]>;
+  getAvailableEmployees(): Promise<Employee[]>;
+  findMatchingTechnicians(jobRequirements: { jobType?: string; skills?: string[]; techsNeeded?: number }): Promise<Employee[]>;
   
   // Health and stats methods
   checkConnection(): Promise<boolean>;
@@ -341,6 +348,87 @@ export class DatabaseStorage implements IStorage {
     }
 
     return syncedVariables;
+  }
+
+  // Employee method implementations
+  async createEmployee(employee: InsertEmployee): Promise<Employee> {
+    const [createdEmployee] = await db
+      .insert(employees)
+      .values(employee)
+      .returning();
+    return createdEmployee;
+  }
+
+  async getEmployees(): Promise<Employee[]> {
+    return await db
+      .select()
+      .from(employees)
+      .orderBy(desc(employees.createdAt));
+  }
+
+  async getAvailableEmployees(): Promise<Employee[]> {
+    return await db
+      .select()
+      .from(employees)
+      .where(eq(employees.isAvailable, 'true'))
+      .orderBy(desc(employees.createdAt));
+  }
+
+  async findMatchingTechnicians(jobRequirements: { 
+    jobType?: string; 
+    skills?: string[]; 
+    techsNeeded?: number 
+  }): Promise<Employee[]> {
+    // Start with available employees
+    let query = db
+      .select()
+      .from(employees)
+      .where(eq(employees.isAvailable, 'true'));
+
+    // Get all available employees first
+    const availableEmployees = await query;
+
+    // If no specific requirements, return all available employees
+    if (!jobRequirements.jobType && (!jobRequirements.skills || jobRequirements.skills.length === 0)) {
+      return availableEmployees.slice(0, jobRequirements.techsNeeded || 10);
+    }
+
+    // Filter and score employees based on requirements
+    const scoredEmployees = availableEmployees.map(employee => {
+      let score = 0;
+      const employeeSkills = employee.skills || [];
+
+      // Score based on skill matches
+      if (jobRequirements.skills && jobRequirements.skills.length > 0) {
+        const matchingSkills = jobRequirements.skills.filter(skill => 
+          employeeSkills.some(empSkill => 
+            empSkill.toLowerCase().includes(skill.toLowerCase()) ||
+            skill.toLowerCase().includes(empSkill.toLowerCase())
+          )
+        );
+        score += (matchingSkills.length / jobRequirements.skills.length) * 100;
+      }
+
+      // Score based on job type if specified
+      if (jobRequirements.jobType) {
+        const hasRelevantSkill = employeeSkills.some(skill =>
+          skill.toLowerCase().includes(jobRequirements.jobType!.toLowerCase()) ||
+          jobRequirements.jobType!.toLowerCase().includes(skill.toLowerCase())
+        );
+        if (hasRelevantSkill) {
+          score += 50;
+        }
+      }
+
+      return { employee, score };
+    });
+
+    // Sort by score (highest first) and return requested number
+    const sortedEmployees = scoredEmployees
+      .sort((a, b) => b.score - a.score)
+      .map(item => item.employee);
+
+    return sortedEmployees.slice(0, jobRequirements.techsNeeded || 10);
   }
 }
 

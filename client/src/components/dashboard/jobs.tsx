@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2, MoreHorizontal, Eye, Edit, Users } from "lucide-react";
+import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2, MoreHorizontal, Eye, Edit, Users, ChevronDown, ChevronUp, Mail, Award, CheckCircle } from "lucide-react";
 import { format } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -29,9 +30,35 @@ interface Job {
   updatedAt: string;
 }
 
+interface Employee {
+  id: string;
+  name: string;
+  email: string;
+  skills: string[];
+  isAvailable: string;
+  createdAt: string;
+}
+
+interface TechnicianMatchResult {
+  status: string;
+  job: {
+    id: string;
+    clientEmail: string;
+    location: string | null;
+    jobType: string | null;
+    techsNeeded: number | null;
+  };
+  matchingTechnicians: Employee[];
+  totalMatches: number;
+}
+
 export function Jobs() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  
+  // State for expandable technician matching results
+  const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
+  const [technicianResults, setTechnicianResults] = useState<Map<string, TechnicianMatchResult>>(new Map());
 
   const { data: jobs, isLoading, error, refetch } = useQuery<Job[]>({
     queryKey: ["/api/jobs"],
@@ -70,10 +97,63 @@ export function Jobs() {
     },
   });
 
+  const findTechniciansMutation = useMutation({
+    mutationFn: async (jobId: string): Promise<TechnicianMatchResult> => {
+      const response = await fetch(`/api/jobs/${jobId}/find-technicians`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Failed to find matching technicians");
+      }
+      
+      return response.json();
+    },
+    onSuccess: (data, jobId) => {
+      // Store the results for this job
+      setTechnicianResults(prev => new Map(prev).set(jobId, data));
+      
+      // Expand the job row to show results
+      setExpandedJobs(prev => new Set(prev).add(jobId));
+      
+      toast({
+        title: "Technicians Found",
+        description: `Found ${data.totalMatches} matching technician${data.totalMatches !== 1 ? 's' : ''} for this job.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Search failed",
+        description: error.message || "Failed to find matching technicians.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleDelete = async (jobId: string, clientEmail: string) => {
     if (window.confirm(`Are you sure you want to delete the job request from ${clientEmail}? This action cannot be undone.`)) {
       deleteMutation.mutate(jobId);
     }
+  };
+
+  const handleFindTechnicians = (jobId: string) => {
+    findTechniciansMutation.mutate(jobId);
+  };
+
+  const toggleJobExpansion = (jobId: string) => {
+    setExpandedJobs(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(jobId)) {
+        newSet.delete(jobId);
+      } else {
+        newSet.add(jobId);
+      }
+      return newSet;
+    });
   };
 
   const handleRefresh = () => {
@@ -341,17 +421,12 @@ export function Jobs() {
                               Edit Job
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() => {
-                                // TODO: Implement technician matching
-                                toast({
-                                  title: "Find Technicians",
-                                  description: "Technician matching functionality coming soon",
-                                });
-                              }}
+                              onClick={() => handleFindTechnicians(job.id)}
+                              disabled={findTechniciansMutation.isPending}
                               data-testid={`menu-match-${job.id}`}
                             >
                               <Users className="mr-2 h-4 w-4" />
-                              Find Technicians
+                              {findTechniciansMutation.isPending ? "Searching..." : "Find Technicians"}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
@@ -367,6 +442,135 @@ export function Jobs() {
                         </DropdownMenu>
                       </TableCell>
                     </TableRow>
+                    
+                    {/* Expandable technician matching results */}
+                    {technicianResults.has(job.id) && (
+                      <TableRow>
+                        <TableCell colSpan={9} className="p-0">
+                          <div className="border-t bg-muted/30">
+                            <div className="p-4 space-y-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Users className="h-4 w-4 text-blue-500" />
+                                  <h4 className="font-medium">
+                                    Matching Technicians ({technicianResults.get(job.id)?.totalMatches || 0})
+                                  </h4>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => toggleJobExpansion(job.id)}
+                                  data-testid={`button-toggle-${job.id}`}
+                                >
+                                  {expandedJobs.has(job.id) ? (
+                                    <>
+                                      <ChevronUp className="h-4 w-4 mr-1" />
+                                      Collapse
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ChevronDown className="h-4 w-4 mr-1" />
+                                      Expand
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                              
+                              {expandedJobs.has(job.id) && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                  {technicianResults.get(job.id)?.matchingTechnicians.map((technician) => (
+                                    <Card key={technician.id} className="bg-background">
+                                      <CardContent className="p-4">
+                                        <div className="space-y-3">
+                                          {/* Technician header */}
+                                          <div className="flex items-start justify-between">
+                                            <div>
+                                              <h5 className="font-medium text-foreground" data-testid={`text-tech-name-${technician.id}`}>
+                                                {technician.name}
+                                              </h5>
+                                              <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                                <Mail className="h-3 w-3" />
+                                                <span data-testid={`text-tech-email-${technician.id}`}>
+                                                  {technician.email}
+                                                </span>
+                                              </div>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                              <CheckCircle className="h-4 w-4 text-green-500" />
+                                              <span className="text-xs text-green-600 font-medium">Available</span>
+                                            </div>
+                                          </div>
+                                          
+                                          {/* Skills */}
+                                          <div>
+                                            <div className="flex items-center gap-1 mb-2">
+                                              <Award className="h-3 w-3 text-blue-500" />
+                                              <span className="text-xs font-medium text-muted-foreground">Skills</span>
+                                            </div>
+                                            <div className="flex flex-wrap gap-1">
+                                              {technician.skills.map((skill, index) => (
+                                                <span
+                                                  key={index}
+                                                  className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400"
+                                                  data-testid={`skill-${technician.id}-${index}`}
+                                                >
+                                                  {skill}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          </div>
+                                          
+                                          {/* Actions */}
+                                          <div className="flex gap-2 pt-2">
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="flex-1"
+                                              onClick={() => {
+                                                toast({
+                                                  title: "Contact Technician",
+                                                  description: `Contact functionality for ${technician.name} coming soon`,
+                                                });
+                                              }}
+                                              data-testid={`button-contact-${technician.id}`}
+                                            >
+                                              <Mail className="h-3 w-3 mr-1" />
+                                              Contact
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              className="flex-1"
+                                              onClick={() => {
+                                                toast({
+                                                  title: "Assign Technician",
+                                                  description: `Assignment functionality for ${technician.name} coming soon`,
+                                                });
+                                              }}
+                                              data-testid={`button-assign-${technician.id}`}
+                                            >
+                                              <CheckCircle className="h-3 w-3 mr-1" />
+                                              Assign
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  ))}
+                                </div>
+                              )}
+                              
+                              {technicianResults.get(job.id)?.totalMatches === 0 && (
+                                <div className="text-center py-6 text-muted-foreground">
+                                  <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                  <p>No matching technicians found for this job</p>
+                                  <p className="text-sm mt-1">Try adjusting the job requirements or create more employee profiles</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
                   ))}
                 </TableBody>
               </Table>
