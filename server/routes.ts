@@ -14,6 +14,13 @@ const emailPayloadSchema = z.object({
   from: z.string().email(),
   to: z.string().email(),
   "body-plain": z.string(),
+  aiExtracted: z.object({
+    location: z.string().nullable().optional(),
+    scheduledDate: z.string().nullable().optional(),
+    scheduledTime: z.string().nullable().optional(),
+    jobType: z.string().nullable().optional(),
+    techsNeeded: z.number().nullable().optional()
+  }).optional()
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -52,8 +59,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         subject: emailData.subject,
       });
       
-      // Parse job details from email body
-      const parsedJobDetails = EmailParser.parseJobDetails(
+      // Use AI-extracted data if available, otherwise parse
+      const parsedJobDetails = emailData.aiExtracted || EmailParser.parseJobDetails(
         emailData["body-plain"], 
         emailData.subject
       );
