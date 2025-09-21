@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, uuid, date, time } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, uuid, date, time, boolean } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -57,6 +57,21 @@ export const connectedServices = pgTable("connected_services", {
   serviceUrl: varchar("service_url", { length: 500 }).notNull(),
   serviceType: varchar("service_type", { length: 100 }).notNull(),
   status: varchar("status", { length: 50 }).notNull().default("inactive"),
+  lastTested: timestamp("last_tested"),
+  connectionStatus: varchar("connection_status", { length: 50 }).notNull().default("unknown"),
+  createdAt: timestamp("created_at").default(sql`now()`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`now()`).notNull(),
+});
+
+export const serviceEnvironmentVariables = pgTable("service_environment_variables", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  serviceId: uuid("service_id").references(() => connectedServices.id, { onDelete: "cascade" }),
+  variableName: varchar("variable_name", { length: 255 }).notNull(),
+  variableValue: text("variable_value"),
+  description: text("description"),
+  isRequired: boolean("is_required").notNull().default(true),
+  isConfigured: boolean("is_configured").notNull().default(false),
+  serviceType: varchar("service_type", { length: 100 }).notNull(),
   createdAt: timestamp("created_at").default(sql`now()`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`now()`).notNull(),
 });
@@ -78,6 +93,17 @@ export const jobAssignmentsRelations = relations(jobAssignments, ({ one }) => ({
   employee: one(employees, {
     fields: [jobAssignments.employeeId],
     references: [employees.id],
+  }),
+}));
+
+export const connectedServicesRelations = relations(connectedServices, ({ many }) => ({
+  environmentVariables: many(serviceEnvironmentVariables),
+}));
+
+export const serviceEnvironmentVariablesRelations = relations(serviceEnvironmentVariables, ({ one }) => ({
+  service: one(connectedServices, {
+    fields: [serviceEnvironmentVariables.serviceId],
+    references: [connectedServices.id],
   }),
 }));
 
@@ -199,7 +225,16 @@ export type Employee = typeof employees.$inferSelect;
 export type InsertRequestLog = z.infer<typeof insertRequestLogSchema>;
 export type RequestLog = typeof requestLogs.$inferSelect;
 
+export const insertServiceEnvironmentVariableSchema = createInsertSchema(serviceEnvironmentVariables).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export type InsertConnectedService = z.infer<typeof insertConnectedServiceSchema>;
 export type ConnectedService = typeof connectedServices.$inferSelect;
+
+export type InsertServiceEnvironmentVariable = z.infer<typeof insertServiceEnvironmentVariableSchema>;
+export type ServiceEnvironmentVariable = typeof serviceEnvironmentVariables.$inferSelect;
 
 export type JobAssignment = typeof jobAssignments.$inferSelect;

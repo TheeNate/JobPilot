@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertJobSchema, insertRequestLogSchema, insertConnectedServiceSchema, jobs, jobAssignments } from "@shared/schema";
+import { insertJobSchema, insertRequestLogSchema, insertConnectedServiceSchema, insertServiceEnvironmentVariableSchema, jobs, jobAssignments } from "@shared/schema";
 import { logger } from "./services/logger";
 import { EmailParser } from "./services/parser";
 import { z } from "zod";
@@ -510,6 +510,264 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         status: "error",
         message: "Failed to test service connection",
+      });
+    }
+  });
+
+  // Environment Variables Management Endpoints
+  
+  // Get all environment variables or by service
+  app.get("/api/environment-variables", async (req, res) => {
+    try {
+      const { serviceId } = req.query;
+      const envVars = await storage.getServiceEnvironmentVariables(serviceId as string);
+      res.json(envVars);
+    } catch (error) {
+      logger.error("Failed to fetch environment variables", { error });
+      res.status(500).json({
+        status: "error",
+        message: "Failed to fetch environment variables",
+      });
+    }
+  });
+
+  // Create new environment variable
+  app.post("/api/environment-variables", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const envVarData = insertServiceEnvironmentVariableSchema.parse(req.body);
+      const envVar = await storage.createServiceEnvironmentVariable(envVarData);
+      
+      // Log the request
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: "/api/environment-variables",
+        statusCode: 201,
+        responseTime,
+        requestBody: JSON.stringify({ 
+          variableName: envVarData.variableName, 
+          serviceType: envVarData.serviceType 
+        }),
+      });
+      
+      logger.info("Environment variable created", { envVarId: envVar.id });
+      
+      res.status(201).json({
+        status: "success",
+        environmentVariable: envVar,
+      });
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      const isValidationError = error instanceof z.ZodError;
+      const statusCode = isValidationError ? 400 : 500;
+      
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: "/api/environment-variables",
+        statusCode,
+        responseTime,
+        requestBody: JSON.stringify({ 
+          variableName: req.body?.variableName, 
+          serviceType: req.body?.serviceType 
+        }),
+      });
+      
+      logger.error("Failed to create environment variable", { error });
+      
+      if (isValidationError) {
+        res.status(400).json({
+          status: "error",
+          message: "Invalid environment variable data",
+          errors: error.errors,
+        });
+      } else {
+        res.status(500).json({
+          status: "error",
+          message: "Failed to create environment variable",
+        });
+      }
+    }
+  });
+
+  // Update environment variable
+  app.put("/api/environment-variables/:id", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const { id } = req.params;
+      const updates = insertServiceEnvironmentVariableSchema.partial().parse(req.body);
+      
+      const envVar = await storage.updateServiceEnvironmentVariable(id, updates);
+      
+      // Log the request
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "PUT",
+        endpoint: `/api/environment-variables/${id}`,
+        statusCode: 200,
+        responseTime,
+        requestBody: JSON.stringify({ 
+          variableName: updates.variableName, 
+          isConfigured: updates.isConfigured 
+        }),
+      });
+      
+      logger.info("Environment variable updated", { envVarId: id });
+      
+      res.json({
+        status: "success",
+        environmentVariable: envVar,
+      });
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      const isValidationError = error instanceof z.ZodError;
+      const statusCode = error.message?.includes("not found") ? 404 : (isValidationError ? 400 : 500);
+      
+      await storage.createRequestLog({
+        method: "PUT",
+        endpoint: `/api/environment-variables/${req.params.id}`,
+        statusCode,
+        responseTime,
+        requestBody: JSON.stringify({ 
+          variableName: req.body?.variableName, 
+          isConfigured: req.body?.isConfigured 
+        }),
+      });
+      
+      logger.error("Failed to update environment variable", { error });
+      
+      if (error.message?.includes("not found")) {
+        res.status(404).json({
+          status: "error",
+          message: "Environment variable not found",
+        });
+      } else if (isValidationError) {
+        res.status(400).json({
+          status: "error",
+          message: "Invalid environment variable data",
+          errors: error.errors,
+        });
+      } else {
+        res.status(500).json({
+          status: "error",
+          message: "Failed to update environment variable",
+        });
+      }
+    }
+  });
+
+  // Delete environment variable
+  app.delete("/api/environment-variables/:id", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const { id } = req.params;
+      await storage.deleteServiceEnvironmentVariable(id);
+      
+      // Log the request
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "DELETE",
+        endpoint: `/api/environment-variables/${id}`,
+        statusCode: 200,
+        responseTime,
+        requestBody: null,
+      });
+      
+      logger.info("Environment variable deleted", { envVarId: id });
+      
+      res.json({
+        status: "success",
+        message: "Environment variable deleted successfully",
+      });
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      const statusCode = error.message?.includes("not found") ? 404 : 500;
+      
+      await storage.createRequestLog({
+        method: "DELETE",
+        endpoint: `/api/environment-variables/${req.params.id}`,
+        statusCode,
+        responseTime,
+        requestBody: null,
+      });
+      
+      logger.error("Failed to delete environment variable", { error });
+      
+      if (error.message?.includes("not found")) {
+        res.status(404).json({
+          status: "error",
+          message: "Environment variable not found",
+        });
+      } else {
+        res.status(500).json({
+          status: "error",
+          message: "Failed to delete environment variable",
+        });
+      }
+    }
+  });
+
+  // Sync environment variables for a service
+  app.post("/api/services/:id/sync-env", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const { id } = req.params;
+      
+      // Get the service to determine its type
+      const services = await storage.getConnectedServices();
+      const service = services.find(s => s.id === id);
+      
+      if (!service) {
+        return res.status(404).json({
+          status: "error",
+          message: "Service not found",
+        });
+      }
+      
+      // Sync environment variables for this service
+      const syncedVars = await storage.syncEnvironmentVariablesForService(id, service.serviceType);
+      
+      // Log the request
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: `/api/services/${id}/sync-env`,
+        statusCode: 200,
+        responseTime,
+        requestBody: null,
+      });
+      
+      logger.info("Environment variables synced for service", { 
+        serviceId: id, 
+        serviceType: service.serviceType,
+        syncedCount: syncedVars.length 
+      });
+      
+      res.json({
+        status: "success",
+        message: `Synced ${syncedVars.length} environment variables for ${service.serviceType} service`,
+        syncedVariables: syncedVars,
+        serviceType: service.serviceType,
+      });
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: `/api/services/${req.params.id}/sync-env`,
+        statusCode: 500,
+        responseTime,
+        requestBody: null,
+      });
+      
+      logger.error("Failed to sync environment variables", { error });
+      res.status(500).json({
+        status: "error",
+        message: "Failed to sync environment variables",
       });
     }
   });

@@ -1,9 +1,10 @@
 import { 
-  users, jobs, requestLogs, connectedServices,
+  users, jobs, requestLogs, connectedServices, serviceEnvironmentVariables,
   type User, type InsertUser, 
   type Job, type InsertJob,
   type RequestLog, type InsertRequestLog,
-  type ConnectedService, type InsertConnectedService
+  type ConnectedService, type InsertConnectedService,
+  type ServiceEnvironmentVariable, type InsertServiceEnvironmentVariable
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, count, avg, gte, and, lt } from "drizzle-orm";
@@ -28,6 +29,13 @@ export interface IStorage {
   getConnectedServices(): Promise<ConnectedService[]>;
   updateConnectedService(id: string, updates: Partial<InsertConnectedService>): Promise<ConnectedService>;
   deleteConnectedService(id: string): Promise<void>;
+  
+  // Environment variable methods
+  createServiceEnvironmentVariable(envVar: InsertServiceEnvironmentVariable): Promise<ServiceEnvironmentVariable>;
+  getServiceEnvironmentVariables(serviceId?: string): Promise<ServiceEnvironmentVariable[]>;
+  updateServiceEnvironmentVariable(id: string, updates: Partial<InsertServiceEnvironmentVariable>): Promise<ServiceEnvironmentVariable>;
+  deleteServiceEnvironmentVariable(id: string): Promise<void>;
+  syncEnvironmentVariablesForService(serviceId: string, serviceType: string): Promise<ServiceEnvironmentVariable[]>;
   
   // Health and stats methods
   checkConnection(): Promise<boolean>;
@@ -181,6 +189,158 @@ export class DatabaseStorage implements IStorage {
       jobsGrowth,
       averageResponseTime: Math.round(Number(avgResponse?.avg) || 0),
     };
+  }
+
+  // Environment variable methods
+  async createServiceEnvironmentVariable(envVar: InsertServiceEnvironmentVariable): Promise<ServiceEnvironmentVariable> {
+    const [createdEnvVar] = await db
+      .insert(serviceEnvironmentVariables)
+      .values(envVar)
+      .returning();
+    return createdEnvVar;
+  }
+
+  async getServiceEnvironmentVariables(serviceId?: string): Promise<ServiceEnvironmentVariable[]> {
+    if (serviceId) {
+      return await db
+        .select()
+        .from(serviceEnvironmentVariables)
+        .where(eq(serviceEnvironmentVariables.serviceId, serviceId))
+        .orderBy(desc(serviceEnvironmentVariables.createdAt));
+    }
+    
+    return await db
+      .select()
+      .from(serviceEnvironmentVariables)
+      .orderBy(desc(serviceEnvironmentVariables.createdAt));
+  }
+
+  async updateServiceEnvironmentVariable(id: string, updates: Partial<InsertServiceEnvironmentVariable>): Promise<ServiceEnvironmentVariable> {
+    const [updatedEnvVar] = await db
+      .update(serviceEnvironmentVariables)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(serviceEnvironmentVariables.id, id))
+      .returning();
+    
+    if (!updatedEnvVar) {
+      throw new Error("Environment variable not found");
+    }
+    
+    return updatedEnvVar;
+  }
+
+  async deleteServiceEnvironmentVariable(id: string): Promise<void> {
+    const result = await db
+      .delete(serviceEnvironmentVariables)
+      .where(eq(serviceEnvironmentVariables.id, id))
+      .returning();
+    
+    if (result.length === 0) {
+      throw new Error("Environment variable not found");
+    }
+  }
+
+  async syncEnvironmentVariablesForService(serviceId: string, serviceType: string): Promise<ServiceEnvironmentVariable[]> {
+    // Define required environment variables for each service type
+    const serviceTypeRequirements: Record<string, Array<{
+      variableName: string;
+      description: string;
+      isRequired: boolean;
+    }>> = {
+      'technician-matching': [
+        {
+          variableName: 'TECHNICIAN_MATCHING_API_KEY',
+          description: 'API key for technician matching service authentication',
+          isRequired: true,
+        },
+        {
+          variableName: 'TECHNICIAN_MATCHING_WEBHOOK_URL',
+          description: 'Webhook URL for receiving technician matching updates',
+          isRequired: false,
+        },
+        {
+          variableName: 'TECHNICIAN_MATCHING_TIMEOUT',
+          description: 'Request timeout for technician matching API calls (ms)',
+          isRequired: false,
+        },
+      ],
+      'notification': [
+        {
+          variableName: 'NOTIFICATION_API_KEY',
+          description: 'API key for notification service authentication',
+          isRequired: true,
+        },
+        {
+          variableName: 'NOTIFICATION_SENDER_ID',
+          description: 'Sender ID for notification service',
+          isRequired: true,
+        },
+        {
+          variableName: 'NOTIFICATION_WEBHOOK_SECRET',
+          description: 'Secret for validating notification webhooks',
+          isRequired: false,
+        },
+      ],
+      'email': [
+        {
+          variableName: 'EMAIL_SERVICE_API_KEY',
+          description: 'API key for email service authentication',
+          isRequired: true,
+        },
+        {
+          variableName: 'EMAIL_FROM_ADDRESS',
+          description: 'From email address for outgoing emails',
+          isRequired: true,
+        },
+        {
+          variableName: 'EMAIL_TEMPLATE_ID',
+          description: 'Default email template ID',
+          isRequired: false,
+        },
+      ],
+      'integration': [
+        {
+          variableName: 'INTEGRATION_API_KEY',
+          description: 'API key for integration service authentication',
+          isRequired: true,
+        },
+        {
+          variableName: 'INTEGRATION_CLIENT_ID',
+          description: 'Client ID for OAuth integration',
+          isRequired: false,
+        },
+        {
+          variableName: 'INTEGRATION_CLIENT_SECRET',
+          description: 'Client secret for OAuth integration',
+          isRequired: false,
+        },
+      ],
+    };
+
+    const requirements = serviceTypeRequirements[serviceType] || [];
+    const syncedVariables: ServiceEnvironmentVariable[] = [];
+
+    // Get existing environment variables for this service
+    const existingVars = await this.getServiceEnvironmentVariables(serviceId);
+    const existingVarNames = new Set(existingVars.map(v => v.variableName));
+
+    // Create missing environment variables
+    for (const requirement of requirements) {
+      if (!existingVarNames.has(requirement.variableName)) {
+        const envVar = await this.createServiceEnvironmentVariable({
+          serviceId,
+          variableName: requirement.variableName,
+          variableValue: null,
+          description: requirement.description,
+          isRequired: requirement.isRequired,
+          isConfigured: false,
+          serviceType,
+        });
+        syncedVariables.push(envVar);
+      }
+    }
+
+    return syncedVariables;
   }
 }
 
