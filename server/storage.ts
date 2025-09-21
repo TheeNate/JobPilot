@@ -120,13 +120,23 @@ export class DatabaseStorage implements IStorage {
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(connectedServices.id, id))
       .returning();
+    
+    if (!updatedService) {
+      throw new Error("Service not found");
+    }
+    
     return updatedService;
   }
 
   async deleteConnectedService(id: string): Promise<void> {
-    await db
+    const result = await db
       .delete(connectedServices)
-      .where(eq(connectedServices.id, id));
+      .where(eq(connectedServices.id, id))
+      .returning();
+    
+    if (result.length === 0) {
+      throw new Error("Service not found");
+    }
   }
 
   async getServiceStats(): Promise<{

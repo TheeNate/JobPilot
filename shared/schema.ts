@@ -107,6 +107,83 @@ export const insertConnectedServiceSchema = createInsertSchema(connectedServices
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  serviceUrl: z.string().url().refine((url) => {
+    try {
+      const parsed = new URL(url);
+      
+      // Only allow HTTP and HTTPS protocols
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return false;
+      }
+      
+      // Only allow standard ports for security
+      const port = parsed.port ? parseInt(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80);
+      if (![80, 443].includes(port)) {
+        return false;
+      }
+      
+      // Block private IP ranges and localhost
+      const hostname = parsed.hostname.toLowerCase();
+      
+      // Block localhost and loopback variations (IPv4)
+      if (['localhost', '0.0.0.0'].includes(hostname)) {
+        return false;
+      }
+      
+      // Block all IPv4 private, loopback, link-local, and special-use ranges
+      const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+      const ipv4Match = hostname.match(ipv4Regex);
+      if (ipv4Match) {
+        const [, a, b, c, d] = ipv4Match.map(Number);
+        
+        // Validate IP format (0-255 for each octet)
+        if (a > 255 || b > 255 || c > 255 || d > 255) {
+          return false;
+        }
+        
+        // Block dangerous IP ranges
+        if (
+          (a === 0) ||                           // 0.0.0.0/8 - "This network"
+          (a === 127) ||                         // 127.0.0.0/8 - Loopback
+          (a === 10) ||                          // 10.0.0.0/8 - Private
+          (a === 172 && b >= 16 && b <= 31) ||   // 172.16.0.0/12 - Private
+          (a === 192 && b === 168) ||            // 192.168.0.0/16 - Private
+          (a === 169 && b === 254) ||            // 169.254.0.0/16 - Link-local
+          (a === 100 && b >= 64 && b <= 127) ||  // 100.64.0.0/10 - CGNAT
+          (a === 192 && b === 0 && c === 0) ||   // 192.0.0.0/24 - Special-use
+          (a === 198 && b >= 18 && b <= 19) ||   // 198.18.0.0/15 - Benchmark
+          (a >= 224)                             // 224.0.0.0/4 - Multicast/Reserved
+        ) {
+          return false;
+        }
+      }
+      
+      // Block IPv6 private and special ranges (basic patterns)
+      if (hostname.includes(':')) {
+        const lower = hostname.toLowerCase();
+        if (
+          lower === '::1' ||                     // Loopback
+          lower.startsWith('fc') ||              // fc00::/7 - Unique local
+          lower.startsWith('fd') ||              // fd00::/8 - Unique local  
+          lower.startsWith('fe8') ||             // fe80::/10 - Link-local
+          lower.startsWith('fe9') ||
+          lower.startsWith('fea') ||
+          lower.startsWith('feb') ||
+          lower.startsWith('::ffff:')            // IPv4-mapped IPv6
+        ) {
+          return false;
+        }
+      }
+      
+      return true;
+    } catch {
+      return false;
+    }
+  }, {
+    message: "URL must be http/https on port 80/443 and not target private/internal networks"
+  }),
+  status: z.enum(['active', 'inactive']).default('inactive')
 });
 
 // Types

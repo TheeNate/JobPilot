@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertJobSchema, insertRequestLogSchema, jobs, jobAssignments } from "@shared/schema";
+import { insertJobSchema, insertRequestLogSchema, insertConnectedServiceSchema, jobs, jobAssignments } from "@shared/schema";
 import { logger } from "./services/logger";
 import { EmailParser } from "./services/parser";
 import { z } from "zod";
@@ -174,6 +174,342 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         status: "error",
         message: "Failed to fetch stats",
+      });
+    }
+  });
+
+  // Connected Services endpoints
+  
+  // Get all connected services
+  app.get("/api/services", async (req, res) => {
+    try {
+      const services = await storage.getConnectedServices();
+      res.json(services);
+    } catch (error) {
+      logger.error("Failed to fetch connected services", { error });
+      res.status(500).json({
+        status: "error",
+        message: "Failed to fetch connected services",
+      });
+    }
+  });
+
+  // Create new connected service
+  app.post("/api/services", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const serviceData = insertConnectedServiceSchema.parse(req.body);
+      const service = await storage.createConnectedService(serviceData);
+      
+      // Log the request (without sensitive data)
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: "/api/services",
+        statusCode: 201,
+        responseTime,
+        requestBody: JSON.stringify({ serviceName: serviceData.serviceName, serviceType: serviceData.serviceType }),
+      });
+      
+      logger.info("Connected service created", { serviceId: service.id });
+      
+      res.status(201).json({
+        status: "success",
+        service,
+      });
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      const isValidationError = error instanceof z.ZodError;
+      const statusCode = isValidationError ? 400 : 500;
+      
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: "/api/services",
+        statusCode,
+        responseTime,
+        requestBody: JSON.stringify({ serviceName: req.body?.serviceName, serviceType: req.body?.serviceType }),
+      });
+      
+      logger.error("Failed to create connected service", { error });
+      
+      if (isValidationError) {
+        res.status(400).json({
+          status: "error",
+          message: "Invalid service data",
+          errors: error.errors,
+        });
+      } else {
+        res.status(500).json({
+          status: "error",
+          message: "Failed to create connected service",
+        });
+      }
+    }
+  });
+
+  // Update connected service
+  app.put("/api/services/:id", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const { id } = req.params;
+      const updates = insertConnectedServiceSchema.partial().parse(req.body);
+      
+      const service = await storage.updateConnectedService(id, updates);
+      
+      // Log the request (without sensitive data)
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "PUT",
+        endpoint: `/api/services/${id}`,
+        statusCode: 200,
+        responseTime,
+        requestBody: JSON.stringify({ serviceName: updates.serviceName, serviceType: updates.serviceType }),
+      });
+      
+      logger.info("Connected service updated", { serviceId: id });
+      
+      res.json({
+        status: "success",
+        service,
+      });
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      const isValidationError = error instanceof z.ZodError;
+      const isNotFound = error instanceof Error && error.message === "Service not found";
+      const statusCode = isValidationError ? 400 : isNotFound ? 404 : 500;
+      
+      await storage.createRequestLog({
+        method: "PUT",
+        endpoint: `/api/services/${req.params.id}`,
+        statusCode,
+        responseTime,
+        requestBody: JSON.stringify({ serviceName: req.body?.serviceName, serviceType: req.body?.serviceType }),
+      });
+      
+      logger.error("Failed to update connected service", { error });
+      
+      if (isValidationError) {
+        res.status(400).json({
+          status: "error",
+          message: "Invalid service data",
+          errors: error.errors,
+        });
+      } else if (isNotFound) {
+        res.status(404).json({
+          status: "error",
+          message: "Service not found",
+        });
+      } else {
+        res.status(500).json({
+          status: "error",
+          message: "Failed to update connected service",
+        });
+      }
+    }
+  });
+
+  // Delete connected service
+  app.delete("/api/services/:id", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const { id } = req.params;
+      
+      if (!id) {
+        return res.status(400).json({
+          status: "error",
+          message: "Service ID is required"
+        });
+      }
+      
+      await storage.deleteConnectedService(id);
+      
+      // Log the request
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "DELETE",
+        endpoint: `/api/services/${id}`,
+        statusCode: 200,
+        responseTime,
+        requestBody: null,
+      });
+      
+      logger.info("Connected service deleted", { serviceId: id });
+      
+      res.json({
+        status: "success",
+        message: "Connected service deleted successfully",
+      });
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      const isNotFound = error instanceof Error && error.message === "Service not found";
+      const statusCode = isNotFound ? 404 : 500;
+      
+      await storage.createRequestLog({
+        method: "DELETE",
+        endpoint: `/api/services/${req.params.id}`,
+        statusCode,
+        responseTime,
+        requestBody: null,
+      });
+      
+      logger.error("Failed to delete connected service", { error });
+      
+      if (isNotFound) {
+        res.status(404).json({
+          status: "error",
+          message: "Service not found",
+        });
+      } else {
+        res.status(500).json({
+          status: "error",
+          message: "Failed to delete connected service",
+        });
+      }
+    }
+  });
+
+  // Test service connection
+  app.post("/api/services/:id/test", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const { id } = req.params;
+      const services = await storage.getConnectedServices();
+      const service = services.find(s => s.id === id);
+      
+      if (!service) {
+        const responseTime = Date.now() - startTime;
+        await storage.createRequestLog({
+          method: "POST",
+          endpoint: `/api/services/${id}/test`,
+          statusCode: 404,
+          responseTime,
+          requestBody: null,
+        });
+        
+        return res.status(404).json({
+          status: "error",
+          message: "Service not found"
+        });
+      }
+      
+      // Additional validation: Re-validate the service URL for security
+      try {
+        const validationResult = insertConnectedServiceSchema.partial().parse({ serviceUrl: service.serviceUrl });
+      } catch (validationError) {
+        const responseTime = Date.now() - startTime;
+        await storage.createRequestLog({
+          method: "POST",
+          endpoint: `/api/services/${id}/test`,
+          statusCode: 400,
+          responseTime,
+          requestBody: null,
+        });
+        
+        logger.warn("Service URL failed security validation", { serviceId: id });
+        
+        return res.status(400).json({
+          status: "error",
+          message: "Service URL is not secure for testing"
+        });
+      }
+      
+      // Test connection to service health endpoint
+      const healthUrl = new URL("/api/health", service.serviceUrl).href;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout (reduced from 10s)
+      
+      try {
+        const response = await fetch(healthUrl, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          signal: controller.signal,
+          redirect: "manual", // Critical: Prevent redirect following for SSRF protection
+        });
+        
+        clearTimeout(timeoutId);
+        
+        const isHealthy = response.ok;
+        
+        // Update service status based on test result
+        await storage.updateConnectedService(id, {
+          status: isHealthy ? "active" : "inactive"
+        });
+        
+        // Log the request (success branch)
+        const responseTime = Date.now() - startTime;
+        await storage.createRequestLog({
+          method: "POST",
+          endpoint: `/api/services/${id}/test`,
+          statusCode: 200,
+          responseTime,
+          requestBody: null,
+        });
+        
+        logger.info("Service connection tested", { 
+          serviceId: id, 
+          isHealthy
+        });
+        
+        res.json({
+          status: "success",
+          isHealthy,
+          message: isHealthy ? "Service is healthy" : "Service is not responding correctly",
+          testedUrl: healthUrl,
+        });
+        
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        
+        // Update service status to inactive on connection failure
+        await storage.updateConnectedService(id, {
+          status: "inactive"
+        });
+        
+        // Log the request (network failure branch - this was missing before)
+        const responseTime = Date.now() - startTime;
+        await storage.createRequestLog({
+          method: "POST",
+          endpoint: `/api/services/${id}/test`,
+          statusCode: 200,
+          responseTime,
+          requestBody: null,
+        });
+        
+        logger.warn("Service connection test failed", { 
+          serviceId: id, 
+          error: fetchError instanceof Error ? fetchError.message : "Network error"
+        });
+        
+        res.json({
+          status: "success",
+          isHealthy: false,
+          message: "Service is not reachable or not responding",
+          testedUrl: healthUrl,
+          error: fetchError instanceof Error ? fetchError.message : "Network error",
+        });
+      }
+      
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: `/api/services/${req.params.id}/test`,
+        statusCode: 500,
+        responseTime,
+        requestBody: null,
+      });
+      
+      logger.error("Failed to test service connection", { error });
+      res.status(500).json({
+        status: "error",
+        message: "Failed to test service connection",
       });
     }
   });
