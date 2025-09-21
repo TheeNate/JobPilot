@@ -885,10 +885,153 @@ export async function registerRoutes(app: Express): Promise<Server> {
         jobType: job.jobType || undefined,
         skills: job.jobType ? [job.jobType] : [],
         techsNeeded: job.techsNeeded || 5,
+        location: job.location || undefined,
+        scheduledDate: job.scheduledDate || undefined,
+        scheduledTime: job.scheduledTime || undefined,
       };
       
-      // Find matching technicians
-      const matchingTechnicians = await storage.findMatchingTechnicians(jobRequirements);
+      // Find local matching technicians
+      const localTechnicians = await storage.findMatchingTechnicians(jobRequirements);
+      
+      // Get active technician-matching services
+      const services = await storage.getConnectedServices();
+      const technicianServices = services.filter(s => 
+        s.serviceType === "technician-matching" && 
+        s.status === "active"
+      );
+      
+      let externalTechnicians = [];
+      let externalServiceResults = [];
+      
+      // Call external technician matching services
+      for (const service of technicianServices) {
+        try {
+          // Get environment variables for this service (API key, etc.)
+          const envVars = await storage.getServiceEnvironmentVariables(service.id);
+          const apiKeyVar = envVars.find(v => v.variableName === 'TECHNICIAN_MATCHING_API_KEY');
+          const timeoutVar = envVars.find(v => v.variableName === 'TECHNICIAN_MATCHING_TIMEOUT');
+          
+          // Skip if no API key configured
+          if (!apiKeyVar?.isConfigured || !apiKeyVar?.variableValue) {
+            logger.warn("Skipping external service - no API key configured", { 
+              serviceId: service.id, 
+              serviceName: service.serviceName 
+            });
+            externalServiceResults.push({
+              serviceName: service.serviceName,
+              status: "skipped",
+              reason: "No API key configured",
+              matches: 0
+            });
+            continue;
+          }
+          
+          // Prepare request to external service
+          const matchingUrl = new URL("/api/technicians/match", service.serviceUrl).href;
+          const timeout = parseInt(timeoutVar?.variableValue || "10000");
+          
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
+          
+          const response = await fetch(matchingUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${apiKeyVar.variableValue}`,
+              "X-API-Key": apiKeyVar.variableValue, // Alternative auth header
+            },
+            body: JSON.stringify({
+              jobRequirements: {
+                jobType: jobRequirements.jobType,
+                skills: jobRequirements.skills,
+                techsNeeded: jobRequirements.techsNeeded,
+                location: jobRequirements.location,
+                date: jobRequirements.scheduledDate,
+                time: jobRequirements.scheduledTime,
+              },
+              requestId: jobId,
+            }),
+            signal: controller.signal,
+            redirect: "manual", // SSRF protection
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            const externalResult = await response.json();
+            
+            // Process external service response
+            if (externalResult.technicians && Array.isArray(externalResult.technicians)) {
+              // Transform external technician format to our format
+              const transformedTechnicians = externalResult.technicians.map(tech => ({
+                id: `external-${service.id}-${tech.id || tech.technician_id}`,
+                name: tech.name || tech.technician_name,
+                email: tech.email || tech.contact_email,
+                skills: tech.skills || tech.specializations || [],
+                isAvailable: tech.available !== false ? "true" : "false",
+                createdAt: new Date().toISOString(),
+                source: "external",
+                sourceService: service.serviceName,
+                externalId: tech.id || tech.technician_id,
+                matchScore: tech.match_score || tech.score || 0,
+              }));
+              
+              externalTechnicians.push(...transformedTechnicians);
+              
+              externalServiceResults.push({
+                serviceName: service.serviceName,
+                status: "success",
+                matches: transformedTechnicians.length,
+                responseTime: Date.now() - startTime
+              });
+              
+              logger.info("External technician matching successful", {
+                serviceId: service.id,
+                serviceName: service.serviceName,
+                matchedCount: transformedTechnicians.length
+              });
+            }
+          } else {
+            throw new Error(`External service returned ${response.status}: ${response.statusText}`);
+          }
+          
+        } catch (fetchError) {
+          // Log external service failure but continue with other services
+          logger.warn("External technician matching service failed", {
+            serviceId: service.id,
+            serviceName: service.serviceName,
+            error: fetchError instanceof Error ? fetchError.message : "Unknown error"
+          });
+          
+          externalServiceResults.push({
+            serviceName: service.serviceName,
+            status: "failed",
+            reason: fetchError instanceof Error ? fetchError.message : "Connection failed",
+            matches: 0
+          });
+        }
+      }
+      
+      // Combine local and external technicians
+      const allTechnicians = [...localTechnicians, ...externalTechnicians];
+      
+      // Remove duplicates based on email (prefer local over external)
+      const uniqueTechnicians = [];
+      const seenEmails = new Set();
+      
+      for (const tech of allTechnicians) {
+        if (!seenEmails.has(tech.email)) {
+          seenEmails.add(tech.email);
+          uniqueTechnicians.push(tech);
+        }
+      }
+      
+      // Sort by match score (if available) or keep existing order
+      uniqueTechnicians.sort((a, b) => {
+        const scoreA = a.matchScore || 0;
+        const scoreB = b.matchScore || 0;
+        return scoreB - scoreA; // Higher scores first
+      });
       
       // Log the request
       const responseTime = Date.now() - startTime;
@@ -897,13 +1040,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         endpoint: `/api/jobs/${jobId}/find-technicians`,
         statusCode: 200,
         responseTime,
-        requestBody: JSON.stringify({ jobRequirements }),
+        requestBody: JSON.stringify({ 
+          jobRequirements,
+          externalServicesQueried: technicianServices.length
+        }),
       });
       
       logger.info("Technician matching completed", { 
         jobId, 
         jobType: job.jobType,
-        matchedCount: matchingTechnicians.length 
+        localMatches: localTechnicians.length,
+        externalMatches: externalTechnicians.length,
+        totalMatches: uniqueTechnicians.length,
+        externalServicesQueried: technicianServices.length
       });
       
       res.json({
@@ -915,8 +1064,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           jobType: job.jobType,
           techsNeeded: job.techsNeeded,
         },
-        matchingTechnicians,
-        totalMatches: matchingTechnicians.length,
+        matchingTechnicians: uniqueTechnicians,
+        totalMatches: uniqueTechnicians.length,
+        sources: {
+          local: localTechnicians.length,
+          external: externalTechnicians.length,
+          services: externalServiceResults,
+        },
       });
     } catch (error) {
       const responseTime = Date.now() - startTime;
