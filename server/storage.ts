@@ -1,8 +1,9 @@
 import { 
-  users, jobs, requestLogs, 
+  users, jobs, requestLogs, connectedServices,
   type User, type InsertUser, 
   type Job, type InsertJob,
-  type RequestLog, type InsertRequestLog
+  type RequestLog, type InsertRequestLog,
+  type ConnectedService, type InsertConnectedService
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, count, avg, gte, and, lt } from "drizzle-orm";
@@ -21,6 +22,12 @@ export interface IStorage {
   // Request logging methods
   createRequestLog(insertLog: InsertRequestLog): Promise<RequestLog>;
   getRequestLogs(limit?: number): Promise<RequestLog[]>;
+  
+  // Connected services methods
+  createConnectedService(service: InsertConnectedService): Promise<ConnectedService>;
+  getConnectedServices(): Promise<ConnectedService[]>;
+  updateConnectedService(id: string, updates: Partial<InsertConnectedService>): Promise<ConnectedService>;
+  deleteConnectedService(id: string): Promise<void>;
   
   // Health and stats methods
   checkConnection(): Promise<boolean>;
@@ -90,6 +97,36 @@ export class DatabaseStorage implements IStorage {
       .from(requestLogs)
       .orderBy(desc(requestLogs.timestamp))
       .limit(limit);
+  }
+
+  async createConnectedService(service: InsertConnectedService): Promise<ConnectedService> {
+    const [createdService] = await db
+      .insert(connectedServices)
+      .values(service)
+      .returning();
+    return createdService;
+  }
+
+  async getConnectedServices(): Promise<ConnectedService[]> {
+    return await db
+      .select()
+      .from(connectedServices)
+      .orderBy(desc(connectedServices.createdAt));
+  }
+
+  async updateConnectedService(id: string, updates: Partial<InsertConnectedService>): Promise<ConnectedService> {
+    const [updatedService] = await db
+      .update(connectedServices)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(connectedServices.id, id))
+      .returning();
+    return updatedService;
+  }
+
+  async deleteConnectedService(id: string): Promise<void> {
+    await db
+      .delete(connectedServices)
+      .where(eq(connectedServices.id, id));
   }
 
   async getServiceStats(): Promise<{

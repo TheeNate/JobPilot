@@ -51,6 +51,16 @@ export const requestLogs = pgTable("request_logs", {
   timestamp: timestamp("timestamp").default(sql`now()`).notNull(),
 });
 
+export const connectedServices = pgTable("connected_services", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  serviceName: varchar("service_name", { length: 255 }).notNull(),
+  serviceUrl: varchar("service_url", { length: 500 }).notNull(),
+  serviceType: varchar("service_type", { length: 100 }).notNull(),
+  status: varchar("status", { length: 50 }).notNull().default("inactive"),
+  createdAt: timestamp("created_at").default(sql`now()`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`now()`).notNull(),
+});
+
 // Relations
 export const jobsRelations = relations(jobs, ({ many }) => ({
   assignments: many(jobAssignments),
@@ -93,6 +103,12 @@ export const insertRequestLogSchema = createInsertSchema(requestLogs).omit({
   timestamp: true,
 });
 
+export const insertConnectedServiceSchema = createInsertSchema(connectedServices).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -105,5 +121,8 @@ export type Employee = typeof employees.$inferSelect;
 
 export type InsertRequestLog = z.infer<typeof insertRequestLogSchema>;
 export type RequestLog = typeof requestLogs.$inferSelect;
+
+export type InsertConnectedService = z.infer<typeof insertConnectedServiceSchema>;
+export type ConnectedService = typeof connectedServices.$inferSelect;
 
 export type JobAssignment = typeof jobAssignments.$inferSelect;
