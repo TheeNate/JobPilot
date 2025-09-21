@@ -1,4 +1,4 @@
-import { Cog, Database, FileText, Home, Plug, Settings, Table, Briefcase } from "lucide-react";
+import { Cog, Database, FileText, Home, Plug, Settings, Table, Briefcase, Server } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
@@ -8,6 +8,7 @@ interface SidebarProps {
 
 const navItems = [
   { id: "jobs", label: "Job Requests", icon: Briefcase },
+  { id: "services", label: "Connected Services", icon: Server },
   { id: "overview", label: "Overview", icon: Home },
   { id: "endpoints", label: "API Endpoints", icon: Plug },
   { id: "database", label: "Database", icon: Database },
