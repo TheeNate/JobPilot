@@ -2,7 +2,14 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2, MoreHorizontal, Eye, Edit, Users } from "lucide-react";
 import { format } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -294,16 +301,70 @@ export function Jobs() {
                         </span>
                       </TableCell>
                       <TableCell className="text-center">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(job.id, job.clientEmail)}
-                          disabled={deleteMutation.isPending}
-                          className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
-                          data-testid={`button-delete-${job.id}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              data-testid={`button-menu-${job.id}`}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                              <span className="sr-only">Open job menu</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                // TODO: Implement view details functionality
+                                toast({
+                                  title: "View Details",
+                                  description: "Job details view coming soon",
+                                });
+                              }}
+                              data-testid={`menu-view-${job.id}`}
+                            >
+                              <Eye className="mr-2 h-4 w-4" />
+                              View Details
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => {
+                                // TODO: Implement edit functionality
+                                toast({
+                                  title: "Edit Job",
+                                  description: "Job editing functionality coming soon",
+                                });
+                              }}
+                              data-testid={`menu-edit-${job.id}`}
+                            >
+                              <Edit className="mr-2 h-4 w-4" />
+                              Edit Job
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => {
+                                // TODO: Implement technician matching
+                                toast({
+                                  title: "Find Technicians",
+                                  description: "Technician matching functionality coming soon",
+                                });
+                              }}
+                              data-testid={`menu-match-${job.id}`}
+                            >
+                              <Users className="mr-2 h-4 w-4" />
+                              Find Technicians
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => handleDelete(job.id, job.clientEmail)}
+                              disabled={deleteMutation.isPending}
+                              className="text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-900/20"
+                              data-testid={`menu-delete-${job.id}`}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete Job
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   ))}
