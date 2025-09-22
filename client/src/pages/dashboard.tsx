@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Sidebar } from "@/components/ui/sidebar";
 import { Overview } from "@/components/dashboard/overview";
 import { Jobs } from "@/components/dashboard/jobs";
-import { Services } from "@/components/dashboard/services";
 import { Endpoints } from "@/components/dashboard/endpoints";
 import { Database } from "@/components/dashboard/database";
 import { Configuration } from "@/components/dashboard/configuration";
@@ -11,16 +10,12 @@ import { Architecture } from "@/components/dashboard/architecture";
 import { Button } from "@/components/ui/button";
 import { RotateCcw } from "lucide-react";
 
-type TabType = "jobs" | "services" | "overview" | "endpoints" | "database" | "config" | "logs" | "architecture";
+type TabType = "jobs" | "overview" | "endpoints" | "database" | "config" | "logs" | "architecture";
 
 const tabData = {
   jobs: {
     title: "Job Requests",
     subtitle: "Parsed job intake requests from emails",
-  },
-  services: {
-    title: "Connected Services",
-    subtitle: "Manage external service integrations and connections",
   },
   overview: {
     title: "Service Overview",
@@ -59,8 +54,6 @@ export default function Dashboard() {
     switch (activeTab) {
       case "jobs":
         return <Jobs />;
-      case "services":
-        return <Services />;
       case "overview":
         return <Overview />;
       case "endpoints":
