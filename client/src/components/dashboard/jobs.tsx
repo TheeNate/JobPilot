@@ -2,7 +2,7 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2 } from "lucide-react";
+import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2, Users, Star } from "lucide-react";
 import { format } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -17,6 +17,8 @@ interface Job {
   scheduledTime: string | null;
   jobType: string | null;
   techsNeeded: number | null;
+  proposedStaffing: string | null;
+  matchScore: number | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -223,6 +225,7 @@ export function Jobs() {
                     <TableHead className="w-[80px]">Time</TableHead>
                     <TableHead className="w-[150px]">Job Type</TableHead>
                     <TableHead className="w-[80px] text-center">Techs</TableHead>
+                    <TableHead className="w-[180px]">Proposed Staffing</TableHead>
                     <TableHead className="w-[100px]">Status</TableHead>
                     <TableHead className="w-[80px] text-center">Actions</TableHead>
                   </TableRow>
@@ -283,6 +286,27 @@ export function Jobs() {
                           <span className="text-sm font-medium">{job.techsNeeded}</span>
                         ) : (
                           <span className="text-xs text-muted-foreground italic">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell data-testid={`text-staffing-${job.id}`}>
+                        {job.proposedStaffing ? (
+                          <div className="flex items-center space-x-2">
+                            <Users className="h-4 w-4 text-blue-500" />
+                            <div className="flex flex-col">
+                              <span className="text-sm">{job.proposedStaffing}</span>
+                              {job.matchScore && (
+                                <div className="flex items-center space-x-1">
+                                  <Star className="h-3 w-3 text-yellow-500 fill-current" />
+                                  <span className="text-xs text-muted-foreground">{job.matchScore}% match</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center space-x-2 text-muted-foreground">
+                            <Users className="h-4 w-4 opacity-50" />
+                            <span className="text-xs italic">No match yet</span>
+                          </div>
                         )}
                       </TableCell>
                       <TableCell>
