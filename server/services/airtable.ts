@@ -1,0 +1,361 @@
+import { logger } from "./logger";
+
+// Airtable API response interfaces
+export interface AirtableRecord<T = any> {
+  id: string;
+  fields: T;
+  createdTime: string;
+}
+
+export interface AirtableResponse<T = any> {
+  records: AirtableRecord<T>[];
+  offset?: string;
+}
+
+export interface AirtableError {
+  type: string;
+  message: string;
+}
+
+// Technician data interfaces
+export interface TechnicianFields {
+  Name: string;
+  "Employee ID": string;
+  Certifications?: string[];
+  Status: "Active" | "Inactive";
+}
+
+export interface AvailabilityFields {
+  Technician: string[]; // Array of linked record IDs
+  "Period Type": "Available" | "Unavailable" | "Booked";
+  "Start Date": string;
+  "End Date"?: string;
+  Reason?: string;
+}
+
+// Rate limiting configuration
+interface RateLimiter {
+  requests: number;
+  resetTime: number;
+  maxRequests: number;
+  windowMs: number;
+}
+
+export class AirtableService {
+  private apiKey: string;
+  private baseId: string;
+  private rateLimiter: RateLimiter;
+  private readonly baseUrl = "https://api.airtable.com/v0";
+
+  constructor() {
+    this.apiKey = process.env.AIRTABLE_API_KEY || "";
+    this.baseId = process.env.AIRTABLE_BASE_ID || "";
+    
+    // Initialize rate limiter (5 requests per second)
+    const maxRequests = parseInt(process.env.AIRTABLE_RATE_LIMIT_RPM || "300"); // 5 req/sec = 300/min
+    this.rateLimiter = {
+      requests: 0,
+      resetTime: Date.now() + 60000, // 1 minute window
+      maxRequests,
+      windowMs: 60000
+    };
+
+    if (!this.apiKey || !this.baseId) {
+      logger.error("Airtable configuration missing", {
+        hasApiKey: !!this.apiKey,
+        hasBaseId: !!this.baseId
+      });
+    }
+  }
+
+  /**
+   * Check if Airtable service is properly configured and accessible
+   */
+  async checkHealth(): Promise<{ 
+    status: "healthy" | "unhealthy"; 
+    message?: string; 
+    quotaUsed?: number;
+    lastConnection?: string;
+  }> {
+    try {
+      if (!this.apiKey || !this.baseId) {
+        return {
+          status: "unhealthy",
+          message: "Missing API key or Base ID configuration"
+        };
+      }
+
+      // Test connection by fetching base metadata
+      const response = await this.makeRequest(`/${this.baseId}/Technicians`, {
+        maxRecords: 1,
+        fields: ["Name"]
+      });
+
+      return {
+        status: "healthy",
+        quotaUsed: this.rateLimiter.requests,
+        lastConnection: new Date().toISOString()
+      };
+    } catch (error) {
+      logger.error("Airtable health check failed", { error });
+      return {
+        status: "unhealthy",
+        message: error instanceof Error ? error.message : "Unknown error"
+      };
+    }
+  }
+
+  /**
+   * Get all active technicians from Airtable
+   */
+  async getActiveTechnicians(): Promise<AirtableRecord<TechnicianFields>[]> {
+    try {
+      const filterFormula = `{Status} = 'Active'`;
+      const fields = ["Name", "Employee ID", "Certifications", "Status"];
+
+      const response = await this.makeRequest<TechnicianFields>(`/${this.baseId}/Technicians`, {
+        filterByFormula: filterFormula,
+        fields: fields
+      });
+
+      logger.info("Retrieved active technicians from Airtable", {
+        count: response.records.length
+      });
+
+      return response.records;
+    } catch (error) {
+      logger.error("Failed to get active technicians", { error });
+      throw new Error(`Failed to retrieve technicians: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  }
+
+  /**
+   * Get technician availability for a specific date range
+   */
+  async getTechnicianAvailability(startDate: string, endDate?: string): Promise<AirtableRecord<AvailabilityFields>[]> {
+    try {
+      // Build filter formula for date range
+      const endDateFilter = endDate ? `{Start Date} <= '${endDate}'` : `{Start Date} <= '${startDate}'`;
+      const filterFormula = `AND(
+        ${endDateFilter},
+        OR(
+          {End Date} >= '${startDate}',
+          {End Date} = BLANK()
+        )
+      )`;
+
+      const fields = ["Technician", "Period Type", "Start Date", "End Date", "Reason"];
+
+      const response = await this.makeRequest<AvailabilityFields>(`/${this.baseId}/Availability%20Periods`, {
+        filterByFormula: filterFormula,
+        fields: fields
+      });
+
+      logger.info("Retrieved technician availability", {
+        dateRange: { startDate, endDate },
+        recordCount: response.records.length
+      });
+
+      return response.records;
+    } catch (error) {
+      logger.error("Failed to get technician availability", { error });
+      throw new Error(`Failed to retrieve availability: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  }
+
+  /**
+   * Find available technicians for a specific job date and requirements
+   */
+  async findAvailableTechnicians(jobDate: string, jobType?: string): Promise<{
+    technician: AirtableRecord<TechnicianFields>;
+    availability: AirtableRecord<AvailabilityFields>[];
+    matchScore: number;
+  }[]> {
+    try {
+      // Get all active technicians and availability data
+      const [technicians, availabilityRecords] = await Promise.all([
+        this.getActiveTechnicians(),
+        this.getTechnicianAvailability(jobDate)
+      ]);
+
+      const results: {
+        technician: AirtableRecord<TechnicianFields>;
+        availability: AirtableRecord<AvailabilityFields>[];
+        matchScore: number;
+      }[] = [];
+
+      // Process each technician
+      for (const technician of technicians) {
+        // Find availability records for this technician
+        const techAvailability = availabilityRecords.filter(record => 
+          record.fields.Technician?.includes(technician.id)
+        );
+
+        // Check if technician is available on the job date
+        const isAvailable = this.checkTechnicianAvailability(techAvailability, jobDate);
+        
+        if (isAvailable) {
+          // Calculate match score based on certifications
+          const matchScore = this.calculateMatchScore(technician.fields, jobType);
+          
+          results.push({
+            technician,
+            availability: techAvailability,
+            matchScore
+          });
+        }
+      }
+
+      // Sort by match score (highest first)
+      results.sort((a, b) => b.matchScore - a.matchScore);
+
+      logger.info("Found available technicians", {
+        jobDate,
+        jobType,
+        totalTechnicians: technicians.length,
+        availableTechnicians: results.length
+      });
+
+      return results;
+    } catch (error) {
+      logger.error("Failed to find available technicians", { error });
+      throw new Error(`Failed to find available technicians: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  }
+
+  /**
+   * Check if a technician is available on a specific date
+   */
+  private checkTechnicianAvailability(availability: AirtableRecord<AvailabilityFields>[], jobDate: string): boolean {
+    const jobDateTime = new Date(jobDate);
+    
+    for (const record of availability) {
+      const startDate = new Date(record.fields["Start Date"]);
+      const endDate = record.fields["End Date"] ? new Date(record.fields["End Date"]) : null;
+      
+      // Check if job date falls within this availability period
+      const isInPeriod = jobDateTime >= startDate && (!endDate || jobDateTime <= endDate);
+      
+      if (isInPeriod) {
+        // If period type is "Available", technician is available
+        if (record.fields["Period Type"] === "Available") {
+          return true;
+        }
+        // If period type is "Unavailable" or "Booked", technician is not available
+        if (record.fields["Period Type"] === "Unavailable" || record.fields["Period Type"] === "Booked") {
+          return false;
+        }
+      }
+    }
+    
+    // If no availability records found, assume available (default state)
+    return availability.length === 0;
+  }
+
+  /**
+   * Calculate match score based on technician certifications and job requirements
+   */
+  private calculateMatchScore(technician: TechnicianFields, jobType?: string): number {
+    if (!jobType || !technician.Certifications) {
+      return 50; // Base score when no job type or certifications
+    }
+
+    const certifications = technician.Certifications;
+    const jobTypeLower = jobType.toLowerCase();
+    let score = 50; // Base score
+
+    // Exact certification matches
+    for (const cert of certifications) {
+      const certLower = cert.toLowerCase();
+      
+      // Direct job type matches
+      if (certLower.includes(jobTypeLower) || jobTypeLower.includes(certLower)) {
+        score += 30;
+      }
+      
+      // Specific skill matches
+      if (jobTypeLower.includes('ut') && certLower.includes('ut')) score += 25;
+      if (jobTypeLower.includes('rt') && certLower.includes('rt')) score += 25;
+      if (jobTypeLower.includes('welding') && certLower.includes('weld')) score += 25;
+      if (jobTypeLower.includes('rope') && certLower.includes('rope')) score += 25;
+      if (jobTypeLower.includes('inspection') && certLower.includes('inspect')) score += 15;
+      if (jobTypeLower.includes('safety') && certLower.includes('osha')) score += 15;
+    }
+
+    return Math.min(score, 100); // Cap at 100%
+  }
+
+  /**
+   * Make a rate-limited request to Airtable API
+   */
+  private async makeRequest<T = any>(endpoint: string, params: Record<string, any> = {}): Promise<AirtableResponse<T>> {
+    await this.enforceRateLimit();
+
+    const url = new URL(this.baseUrl + endpoint);
+    
+    // Add query parameters
+    Object.entries(params).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach(v => url.searchParams.append(key, v));
+      } else if (value !== undefined) {
+        url.searchParams.append(key, String(value));
+      }
+    });
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    this.rateLimiter.requests++;
+
+    if (response.status === 429) {
+      logger.warn("Airtable rate limit exceeded, waiting 30 seconds");
+      await new Promise(resolve => setTimeout(resolve, 30000));
+      return this.makeRequest<T>(endpoint, params);
+    }
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: "Unknown error" }));
+      throw new Error(`Airtable API error ${response.status}: ${error.message || "Unknown error"}`);
+    }
+
+    const data = await response.json();
+    
+    logger.debug("Airtable API request completed", {
+      endpoint,
+      status: response.status,
+      recordCount: data.records?.length || 0
+    });
+
+    return data;
+  }
+
+  /**
+   * Enforce rate limiting (5 requests per second)
+   */
+  private async enforceRateLimit(): Promise<void> {
+    const now = Date.now();
+    
+    // Reset counter if window has passed
+    if (now > this.rateLimiter.resetTime) {
+      this.rateLimiter.requests = 0;
+      this.rateLimiter.resetTime = now + this.rateLimiter.windowMs;
+    }
+    
+    // Wait if we've hit the rate limit
+    if (this.rateLimiter.requests >= this.rateLimiter.maxRequests) {
+      const waitTime = this.rateLimiter.resetTime - now;
+      logger.info("Rate limit reached, waiting", { waitTime });
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      this.rateLimiter.requests = 0;
+      this.rateLimiter.resetTime = Date.now() + this.rateLimiter.windowMs;
+    }
+  }
+}
+
+// Export singleton instance
+export const airtableService = new AirtableService();
