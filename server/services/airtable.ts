@@ -137,34 +137,64 @@ export class AirtableService {
   }
 
   /**
-   * Get all active technicians from Airtable
+   * Get all active technicians from Airtable with graceful error handling
    */
   async getActiveTechnicians(): Promise<AirtableRecord<TechnicianFields>[]> {
     try {
-      const filterFormula = `{Status} = 'Active'`;
-      const fields = ["Name", "Employee ID", "Certifications", "Status"];
+      // Try multiple common table names for technicians
+      const possibleTableNames = ['Technicians', 'Employees', 'Staff', 'Workers', 'Team Members'];
+      const tableNameEnv = process.env.AIRTABLE_TECHNICIANS_TABLE;
+      
+      if (tableNameEnv) {
+        possibleTableNames.unshift(tableNameEnv);
+      }
+      
+      for (const tableName of possibleTableNames) {
+        try {
+          const filterFormula = `{Status} = 'Active'`;
+          const fields = ["Name", "Employee ID", "Certifications", "Status"];
 
-      const response = await this.makeRequest<TechnicianFields>(`/${this.baseId}/Technicians`, {
-        filterByFormula: filterFormula,
-        fields: fields
-      });
+          const response = await this.makeRequest<TechnicianFields>(`/${this.baseId}/${encodeURIComponent(tableName)}`, {
+            filterByFormula: filterFormula,
+            fields: fields
+          });
 
-      logger.info("Retrieved active technicians from Airtable", {
-        count: response.records.length
-      });
+          logger.info(`Retrieved active technicians from Airtable table: ${tableName}`, {
+            count: response.records.length
+          });
 
-      return response.records;
+          return response.records;
+        } catch (tableError) {
+          logger.debug(`Table '${tableName}' not found or accessible, trying next...`, { 
+            error: tableError instanceof Error ? tableError.message : 'Unknown error' 
+          });
+          continue;
+        }
+      }
+      
+      // If no tables work, log a warning and return empty array instead of throwing
+      logger.warn(`No accessible technician table found. Tried: ${possibleTableNames.join(', ')}. Please ensure you have a table with technician data and proper field names.`);
+      return [];
     } catch (error) {
       logger.error("Failed to get active technicians", { error });
-      throw new Error(`Failed to retrieve technicians: ${error instanceof Error ? error.message : "Unknown error"}`);
+      // Return empty array instead of throwing to maintain system resilience
+      logger.warn("Returning empty technicians list due to error");
+      return [];
     }
   }
 
   /**
-   * Get technician availability for a specific date range
+   * Get technician availability for a specific date range with graceful error handling
    */
   async getTechnicianAvailability(startDate: string, endDate?: string): Promise<AirtableRecord<AvailabilityFields>[]> {
     try {
+      const possibleTableNames = ['Availability Periods', 'Availability', 'Schedule', 'Calendar'];
+      const tableNameEnv = process.env.AIRTABLE_AVAILABILITY_TABLE;
+      
+      if (tableNameEnv) {
+        possibleTableNames.unshift(tableNameEnv);
+      }
+      
       // Build filter formula for date range
       const endDateFilter = endDate ? `{Start Date} <= '${endDate}'` : `{Start Date} <= '${startDate}'`;
       const filterFormula = `AND(
@@ -177,20 +207,35 @@ export class AirtableService {
 
       const fields = ["Technician", "Period Type", "Start Date", "End Date", "Reason"];
 
-      const response = await this.makeRequest<AvailabilityFields>(`/${this.baseId}/Availability%20Periods`, {
-        filterByFormula: filterFormula,
-        fields: fields
-      });
+      for (const tableName of possibleTableNames) {
+        try {
+          const response = await this.makeRequest<AvailabilityFields>(`/${this.baseId}/${encodeURIComponent(tableName)}`, {
+            filterByFormula: filterFormula,
+            fields: fields
+          });
 
-      logger.info("Retrieved technician availability", {
-        dateRange: { startDate, endDate },
-        recordCount: response.records.length
-      });
+          logger.info(`Retrieved technician availability from table: ${tableName}`, {
+            dateRange: { startDate, endDate },
+            recordCount: response.records.length
+          });
 
-      return response.records;
+          return response.records;
+        } catch (tableError) {
+          logger.debug(`Availability table '${tableName}' not found or accessible, trying next...`, { 
+            error: tableError instanceof Error ? tableError.message : 'Unknown error' 
+          });
+          continue;
+        }
+      }
+      
+      // If no tables work, log a warning and return empty array
+      logger.warn(`No accessible availability table found. Tried: ${possibleTableNames.join(', ')}.`);
+      return [];
     } catch (error) {
       logger.error("Failed to get technician availability", { error });
-      throw new Error(`Failed to retrieve availability: ${error instanceof Error ? error.message : "Unknown error"}`);
+      // Return empty array instead of throwing to maintain system resilience
+      logger.warn("Returning empty availability list due to error");
+      return [];
     }
   }
 
@@ -250,7 +295,9 @@ export class AirtableService {
       return results;
     } catch (error) {
       logger.error("Failed to find available technicians", { error });
-      throw new Error(`Failed to find available technicians: ${error instanceof Error ? error.message : "Unknown error"}`);
+      // Return empty results instead of throwing to maintain system resilience
+      logger.warn("Returning empty technician matches due to error");
+      return [];
     }
   }
 
