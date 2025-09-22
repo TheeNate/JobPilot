@@ -1,8 +1,9 @@
 import { 
-  users, jobs, requestLogs, 
+  users, jobs, requestLogs, technicianMatches,
   type User, type InsertUser, 
   type Job, type InsertJob,
-  type RequestLog, type InsertRequestLog
+  type RequestLog, type InsertRequestLog,
+  type TechnicianMatch, type InsertTechnicianMatch
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, count, avg, gte, and, lt } from "drizzle-orm";
@@ -22,6 +23,12 @@ export interface IStorage {
   // Request logging methods
   createRequestLog(insertLog: InsertRequestLog): Promise<RequestLog>;
   getRequestLogs(limit?: number): Promise<RequestLog[]>;
+  
+  // Technician matching methods
+  createTechnicianMatch(insertMatch: InsertTechnicianMatch): Promise<TechnicianMatch>;
+  getTechnicianMatches(jobId: string): Promise<TechnicianMatch[]>;
+  updateJobStaffing(jobId: string, proposedStaffing: string, matchScore?: number): Promise<Job | undefined>;
+  deleteJob(id: string): Promise<boolean>;
   
   // Health and stats methods
   checkConnection(): Promise<boolean>;
@@ -140,6 +147,46 @@ export class DatabaseStorage implements IStorage {
       jobsGrowth,
       averageResponseTime: Math.round(Number(avgResponse?.avg) || 0),
     };
+  }
+
+  async createTechnicianMatch(insertMatch: InsertTechnicianMatch): Promise<TechnicianMatch> {
+    const [match] = await db
+      .insert(technicianMatches)
+      .values(insertMatch)
+      .returning();
+    return match;
+  }
+
+  async getTechnicianMatches(jobId: string): Promise<TechnicianMatch[]> {
+    return await db
+      .select()
+      .from(technicianMatches)
+      .where(eq(technicianMatches.jobId, jobId))
+      .orderBy(desc(technicianMatches.matchScore));
+  }
+
+  async updateJobStaffing(jobId: string, proposedStaffing: string, matchScore?: number): Promise<Job | undefined> {
+    const updateData: any = { proposedStaffing };
+    if (matchScore !== undefined) {
+      updateData.matchScore = matchScore;
+    }
+
+    const [job] = await db
+      .update(jobs)
+      .set(updateData)
+      .where(eq(jobs.id, jobId))
+      .returning();
+    return job || undefined;
+  }
+
+  async deleteJob(id: string): Promise<boolean> {
+    try {
+      const result = await db.delete(jobs).where(eq(jobs.id, id));
+      return result.rowCount! > 0;
+    } catch (error) {
+      console.error('Failed to delete job:', error);
+      return false;
+    }
   }
 }
 

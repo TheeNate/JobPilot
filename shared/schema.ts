@@ -20,6 +20,8 @@ export const jobs = pgTable("jobs", {
   scheduledTime: varchar("scheduled_time", { length: 50 }),
   jobType: varchar("job_type", { length: 100 }),
   techsNeeded: integer("techs_needed"),
+  proposedStaffing: text("proposed_staffing"),
+  matchScore: integer("match_score"),
   status: varchar("status", { length: 50 }).notNull().default("pending"),
   createdAt: timestamp("created_at").default(sql`now()`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`now()`).notNull(),
@@ -71,6 +73,21 @@ export const jobAssignmentsRelations = relations(jobAssignments, ({ one }) => ({
   }),
 }));
 
+// Technician matches table for AI-powered matching
+export const technicianMatches = pgTable("technician_matches", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobId: uuid("job_id").notNull().references(() => jobs.id, { onDelete: "cascade" }),
+  technicianId: varchar("technician_id", { length: 255 }).notNull(),
+  technicianName: varchar("technician_name", { length: 255 }).notNull(),
+  matchScore: integer("match_score").notNull(),
+  availability: varchar("availability", { length: 50 }).notNull(),
+  skills: text("skills").array(),
+  distance: integer("distance"),
+  certifications: text("certifications").array(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").default(sql`now()`).notNull(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
@@ -93,6 +110,11 @@ export const insertRequestLogSchema = createInsertSchema(requestLogs).omit({
   timestamp: true,
 });
 
+export const insertTechnicianMatchSchema = createInsertSchema(technicianMatches).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -107,3 +129,6 @@ export type InsertRequestLog = z.infer<typeof insertRequestLogSchema>;
 export type RequestLog = typeof requestLogs.$inferSelect;
 
 export type JobAssignment = typeof jobAssignments.$inferSelect;
+
+export type InsertTechnicianMatch = z.infer<typeof insertTechnicianMatchSchema>;
+export type TechnicianMatch = typeof technicianMatches.$inferSelect;
