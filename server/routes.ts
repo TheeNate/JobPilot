@@ -191,6 +191,279 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get available technicians for a specific date and job type
+  app.get("/api/technicians/available", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const { date, jobType, limit } = req.query;
+      
+      if (!date || typeof date !== "string") {
+        return res.status(400).json({
+          status: "error",
+          message: "Date parameter is required (format: YYYY-MM-DD)"
+        });
+      }
+      
+      const maxLimit = limit ? Math.min(parseInt(limit as string), 50) : 10;
+      
+      const availableTechnicians = await airtableService.findAvailableTechnicians(
+        date, 
+        jobType as string
+      );
+      
+      const limitedResults = availableTechnicians.slice(0, maxLimit);
+      
+      // Log the request
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "GET",
+        endpoint: "/api/technicians/available",
+        statusCode: 200,
+        responseTime,
+        requestBody: null,
+      });
+      
+      logger.info("Retrieved available technicians", {
+        date,
+        jobType,
+        count: limitedResults.length,
+        responseTime
+      });
+      
+      res.json({
+        status: "success",
+        data: limitedResults.map(result => ({
+          technician: {
+            id: result.technician.id,
+            name: result.technician.fields.Name,
+            employeeId: result.technician.fields["Employee ID"],
+            certifications: result.technician.fields.Certifications || [],
+            status: result.technician.fields.Status
+          },
+          matchScore: result.matchScore,
+          availability: result.availability.map(avail => ({
+            periodType: avail.fields["Period Type"],
+            startDate: avail.fields["Start Date"],
+            endDate: avail.fields["End Date"],
+            reason: avail.fields.Reason
+          }))
+        })),
+        metadata: {
+          requestDate: date,
+          jobType,
+          totalCount: availableTechnicians.length,
+          limitApplied: maxLimit
+        }
+      });
+      
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "GET",
+        endpoint: "/api/technicians/available",
+        statusCode: 500,
+        responseTime,
+        requestBody: null,
+      });
+      
+      logger.error("Failed to get available technicians", { error });
+      res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve available technicians",
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Match technicians for a specific job
+  app.post("/api/jobs/:jobId/match-technicians", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const { jobId } = req.params;
+      const { requirementOverrides, forceRefresh } = req.body || {};
+      
+      if (!jobId) {
+        return res.status(400).json({
+          status: "error",
+          message: "Job ID is required"
+        });
+      }
+      
+      // Get job details from database
+      const job = await storage.getJobById(jobId);
+      if (!job) {
+        return res.status(404).json({
+          status: "error",
+          message: "Job not found"
+        });
+      }
+      
+      // Use job's scheduled date or current date as fallback
+      const jobDate = job.scheduledDate || new Date().toISOString().split('T')[0];
+      
+      // Use requirement overrides if provided, otherwise use job details
+      const jobType = requirementOverrides?.jobType || job.jobType;
+      
+      const availableTechnicians = await airtableService.findAvailableTechnicians(
+        jobDate,
+        jobType
+      );
+      
+      // Log the request
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: `/api/jobs/${jobId}/match-technicians`,
+        statusCode: 200,
+        responseTime,
+        requestBody: JSON.stringify(req.body),
+      });
+      
+      logger.info("Matched technicians for job", {
+        jobId,
+        jobDate,
+        jobType,
+        matchCount: availableTechnicians.length,
+        responseTime
+      });
+      
+      res.json({
+        status: "success",
+        data: {
+          jobId,
+          jobDetails: {
+            location: job.location,
+            scheduledDate: job.scheduledDate,
+            scheduledTime: job.scheduledTime,
+            jobType: job.jobType,
+            techsNeeded: job.techsNeeded
+          },
+          proposedStaffing: availableTechnicians.map(result => ({
+            technician: {
+              id: result.technician.id,
+              name: result.technician.fields.Name,
+              employeeId: result.technician.fields["Employee ID"],
+              certifications: result.technician.fields.Certifications || [],
+              status: result.technician.fields.Status
+            },
+            matchScore: result.matchScore,
+            reasoning: generateMatchReasoning(result.technician.fields, jobType, result.matchScore),
+            availability: result.availability.map(avail => ({
+              periodType: avail.fields["Period Type"],
+              startDate: avail.fields["Start Date"],
+              endDate: avail.fields["End Date"],
+              reason: avail.fields.Reason
+            }))
+          })),
+          metadata: {
+            requestDate: jobDate,
+            totalMatches: availableTechnicians.length,
+            timestamp: new Date().toISOString()
+          }
+        }
+      });
+      
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      await storage.createRequestLog({
+        method: "POST",
+        endpoint: `/api/jobs/${req.params.jobId}/match-technicians`,
+        statusCode: 500,
+        responseTime,
+        requestBody: JSON.stringify(req.body),
+      });
+      
+      logger.error("Failed to match technicians for job", { error, jobId: req.params.jobId });
+      res.status(500).json({
+        status: "error",
+        message: "Failed to match technicians",
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Airtable health check endpoint
+  app.get("/api/airtable/health", async (req, res) => {
+    try {
+      const airtableStatus = await airtableService.checkHealth();
+      
+      res.json({
+        status: "success",
+        data: airtableStatus,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error("Airtable health check failed", { error });
+      res.status(500).json({
+        status: "error",
+        message: "Airtable health check failed",
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Manual Airtable sync endpoint
+  app.post("/api/airtable/sync", async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      // Get active technicians to test sync
+      const technicians = await airtableService.getActiveTechnicians();
+      
+      const responseTime = Date.now() - startTime;
+      
+      logger.info("Manual Airtable sync completed", {
+        technicianCount: technicians.length,
+        responseTime
+      });
+      
+      res.json({
+        status: "success",
+        data: {
+          recordsProcessed: technicians.length,
+          responseTime,
+          timestamp: new Date().toISOString()
+        },
+        message: "Airtable sync completed successfully"
+      });
+      
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      logger.error("Manual Airtable sync failed", { error, responseTime });
+      
+      res.status(500).json({
+        status: "error",
+        message: "Airtable sync failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+        responseTime
+      });
+    }
+  });
+
+  // Helper function for match reasoning (define inline to avoid 'this' context issues)
+  const generateMatchReasoning = (technician: any, jobType?: string, matchScore?: number): string => {
+    if (!jobType) return "General availability match";
+    
+    const certifications = technician.Certifications || [];
+    const reasons = [];
+    
+    if (matchScore && matchScore > 75) {
+      reasons.push("Excellent certification match");
+    } else if (matchScore && matchScore > 50) {
+      reasons.push("Good skill alignment");
+    } else {
+      reasons.push("Basic availability match");
+    }
+    
+    if (certifications.some((cert: string) => cert.toLowerCase().includes(jobType.toLowerCase()))) {
+      reasons.push(`Direct ${jobType} certification`);
+    }
+    
+    return reasons.join(", ");
+  };
+
   // Delete job endpoint
   app.delete("/api/jobs/:jobId", async (req, res) => {
     const startTime = Date.now();

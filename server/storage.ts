@@ -16,6 +16,7 @@ export interface IStorage {
   
   // Job methods
   createJob(insertJob: InsertJob): Promise<Job>;
+  getJobById(id: string): Promise<Job | undefined>;
   getRecentJobs(limit?: number): Promise<Job[]>;
   
   // Request logging methods
@@ -66,6 +67,11 @@ export class DatabaseStorage implements IStorage {
       .values(insertJob)
       .returning();
     return job;
+  }
+
+  async getJobById(id: string): Promise<Job | undefined> {
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, id));
+    return job || undefined;
   }
 
   async getRecentJobs(limit = 20): Promise<Job[]> {
