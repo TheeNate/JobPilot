@@ -471,6 +471,10 @@ export class AirtableService {
       }
     });
 
+    console.log("🔍 Constructed URL:", url.toString());
+    console.log("🔍 Filter formula:", params.filterByFormula);
+    console.log("🔍 All params:", params);
+
     const response = await fetch(url.toString(), {
       method: "GET",
       headers: {
