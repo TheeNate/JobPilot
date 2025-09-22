@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { insertJobSchema, insertRequestLogSchema, jobs, jobAssignments } from "@shared/schema";
 import { logger } from "./services/logger";
 import { EmailParser } from "./services/parser";
+import { airtableService } from "./services/airtable";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
@@ -30,10 +31,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Check database connection
       const dbStatus = await storage.checkConnection();
       
-      res.json({
-        status: "healthy",
+      // Check Airtable connection
+      const airtableStatus = await airtableService.checkHealth();
+      
+      const overallStatus = dbStatus && airtableStatus.status === "healthy" ? "healthy" : "unhealthy";
+      const statusCode = overallStatus === "healthy" ? 200 : 503;
+      
+      res.status(statusCode).json({
+        status: overallStatus,
         timestamp: new Date().toISOString(),
         database: dbStatus ? "connected" : "disconnected",
+        airtable: {
+          status: airtableStatus.status,
+          message: airtableStatus.message,
+          quotaUsed: airtableStatus.quotaUsed,
+          lastConnection: airtableStatus.lastConnection
+        },
         uptime: process.uptime(),
       });
     } catch (error) {
