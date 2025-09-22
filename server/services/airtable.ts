@@ -85,22 +85,53 @@ export class AirtableService {
         };
       }
 
-      // Test connection by fetching base metadata
-      const response = await this.makeRequest(`/${this.baseId}/Technicians`, {
-        maxRecords: 1,
-        fields: ["Name"]
-      });
-
-      return {
-        status: "healthy",
-        quotaUsed: this.rateLimiter.requests,
-        lastConnection: new Date().toISOString()
-      };
+      // Basic connectivity test - just check if we can authenticate with the base
+      return await this.fallbackHealthCheck();
     } catch (error) {
       logger.error("Airtable health check failed", { error });
       return {
         status: "unhealthy",
         message: error instanceof Error ? error.message : "Unknown error"
+      };
+    }
+  }
+
+  /**
+   * Fallback health check that doesn't assume specific table structure
+   */
+  private async fallbackHealthCheck(): Promise<{ 
+    status: "healthy" | "unhealthy"; 
+    message?: string; 
+    quotaUsed?: number;
+    lastConnection?: string;
+  }> {
+    try {
+      // Try to make a simple authenticated request to the base without specifying table
+      const response = await fetch(`${this.baseUrl}/${this.baseId}`, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        return {
+          status: "healthy",
+          message: "Connection established (limited table access)",
+          quotaUsed: this.rateLimiter.requests,
+          lastConnection: new Date().toISOString()
+        };
+      } else {
+        const errorText = await response.text();
+        return {
+          status: "unhealthy",
+          message: `HTTP ${response.status}: ${errorText}`
+        };
+      }
+    } catch (error) {
+      return {
+        status: "unhealthy",
+        message: `Fallback health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       };
     }
   }
