@@ -458,7 +458,24 @@ export class AirtableService {
     endpoint: string,
     params: Record<string, any> = {},
   ): Promise<AirtableResponse<T>> {
+    const requestStartTime = Date.now();
+    
+    // 1. LOG RATE LIMITER STATE HERE
+    logger.debug("🕒 Rate limiter state before request", {
+      currentRequests: this.rateLimiter.requests,
+      maxRequests: this.rateLimiter.maxRequests,
+      windowMs: this.rateLimiter.windowMs,
+      resetTime: this.rateLimiter.resetTime,
+    });
+    
     await this.enforceRateLimit();
+
+    // 2. LOG URL CONSTRUCTION HERE
+    logger.debug("🔨 URL construction starting", {
+      baseUrl: this.baseUrl,
+      endpoint: endpoint,
+      rawParams: params,
+    });
 
     const url = new URL(this.baseUrl + endpoint);
 
@@ -471,12 +488,37 @@ export class AirtableService {
       }
     });
 
-    logger.info("🔍 Airtable request debug", {
+    // 3. LOG COMPLETE REQUEST DETAILS HERE
+    logger.info("📤 Airtable API request details", {
       constructedUrl: url.toString(),
-      filterFormula: params.filterByFormula,
-      allParams: params,
       endpoint: endpoint,
+      baseUrl: this.baseUrl,
+      queryParams: Object.fromEntries(url.searchParams),
+      originalParams: params,
+      filterFormula: {
+        original: params.filterByFormula,
+        encoded: params.filterByFormula ? encodeURIComponent(params.filterByFormula) : undefined,
+        urlEncoded: url.searchParams.get('filterByFormula'),
+      },
+      headers: {
+        Authorization: `Bearer ${this.apiKey?.substring(0, 10)}...`,
+        "Content-Type": "application/json",
+      },
+      method: "GET",
     });
+
+    // Compare with working curl format
+    if (params.filterByFormula) {
+      const curlEquivalent = `curl "${url.toString()}"`;
+      logger.debug("📋 Curl equivalent", {
+        curlCommand: curlEquivalent,
+        filterFormula: {
+          app: params.filterByFormula,
+          curl: `{Status} = 'Active'`,
+          encoded: encodeURIComponent(params.filterByFormula),
+        }
+      });
+    }
 
     const response = await fetch(url.toString(), {
       method: "GET",
@@ -486,29 +528,104 @@ export class AirtableService {
       },
     });
 
+    const responseTime = Date.now() - requestStartTime;
+
+    // 4. LOG RESPONSE DETAILS HERE
+    logger.info("📥 Airtable API response received", {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      responseTime: `${responseTime}ms`,
+      url: url.toString(),
+    });
+
     this.rateLimiter.requests++;
 
     if (response.status === 429) {
-      logger.warn("Airtable rate limit exceeded, waiting 30 seconds");
+      // 5. LOG RATE LIMIT DETAILS HERE
+      logger.warn("⚠️ Airtable rate limit exceeded", {
+        status: response.status,
+        retryAfter: response.headers.get('Retry-After'),
+        currentRequests: this.rateLimiter.requests,
+        waitTime: "30 seconds",
+        url: url.toString(),
+      });
       await new Promise((resolve) => setTimeout(resolve, 30000));
       return this.makeRequest<T>(endpoint, params);
     }
 
     if (!response.ok) {
-      const error = await response
-        .json()
-        .catch(() => ({ message: "Unknown error" }));
+      // 6. LOG DETAILED ERROR INFO HERE (especially for 422)
+      let errorDetails;
+      let errorText = "Could not parse error response";
+      
+      try {
+        errorDetails = await response.json();
+        errorText = errorDetails.error?.message || errorDetails.message || JSON.stringify(errorDetails);
+      } catch (parseError) {
+        try {
+          errorText = await response.text();
+        } catch (textError) {
+          errorText = "Could not read error response";
+        }
+      }
+
+      logger.error("❌ Airtable API error response", {
+        status: response.status,
+        statusText: response.statusText,
+        url: url.toString(),
+        endpoint: endpoint,
+        errorDetails: errorDetails,
+        errorText: errorText,
+        requestParams: params,
+        responseHeaders: Object.fromEntries(response.headers.entries()),
+        responseTime: `${responseTime}ms`,
+      });
+
+      // Special debugging for 422 errors
+      if (response.status === 422) {
+        logger.error("🔍 422 Error Analysis", {
+          likelyIssue: "Unprocessable Entity - Parameter or filter syntax error",
+          filterFormula: {
+            sent: params.filterByFormula,
+            encoded: url.searchParams.get('filterByFormula'),
+            expected: `{Status} = 'Active'`,
+          },
+          urlComparison: {
+            app: url.toString(),
+            working: `https://api.airtable.com/v0/${this.baseId}/Technicians?filterByFormula=%7BStatus%7D%20%3D%20%27Active%27`,
+          },
+          commonCauses: [
+            "Filter formula syntax error",
+            "Invalid field names in filter",
+            "URL encoding issues",
+            "Table name doesn't exist",
+            "Missing permissions for table/fields",
+          ],
+        });
+      }
+
       throw new Error(
-        `Airtable API error ${response.status}: ${error.message || "Unknown error"}`,
+        `Airtable API error ${response.status}: ${errorText}`,
       );
     }
 
     const data = await response.json();
 
-    logger.debug("Airtable API request completed", {
+    // 7. LOG SUCCESS DETAILS HERE
+    logger.info("✅ Airtable API request successful", {
       endpoint,
       status: response.status,
       recordCount: data.records?.length || 0,
+      responseTime: `${responseTime}ms`,
+      firstRecord: data.records?.[0] ? {
+        id: data.records[0].id,
+        fields: Object.keys(data.records[0].fields || {}),
+      } : null,
+      rateLimiterState: {
+        requests: this.rateLimiter.requests,
+        maxRequests: this.rateLimiter.maxRequests,
+      },
     });
 
     return data;
