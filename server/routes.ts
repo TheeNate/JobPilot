@@ -379,6 +379,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           },
           proposedStaffing: availableTechnicians,
           aiAnalysis: aiAnalysis ? {
+            teamComposition: aiAnalysis.teamComposition,
             topRecommendation: aiAnalysis.topRecommendation,
             alternatives: aiAnalysis.alternatives,
             jobAnalysis: aiAnalysis.jobAnalysis,

@@ -75,8 +75,8 @@ export class EmailParser {
       
       // Parse number of technicians - enhanced patterns
       const techPatterns = [
-        /(?:we need|need|require|request)\s+(\d+)\s+(?:techs?|technicians?|workers?|people?|personnel)/i,
-        /(\d+)\s+(?:techs?|technicians?|workers?|certified|qualified)/i,
+        /(?:we need|need|require|request)\s+(\d+)\s+(?:\w+\s+)?(?:techs?|technicians?|workers?|people?|personnel)/i, // Handles "Need 2 UT technicians"
+        /(\d+)\s+(?:\w+\s+)?(?:techs?|technicians?|workers?|certified|qualified)/i, // Handles "2 UT technicians"
         /(?:send|assign|dispatch)\s+(\d+)/i,
         /(\d+)\s+(?:techs?|technicians?)/i,
       ];

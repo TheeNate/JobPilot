@@ -30,6 +30,14 @@ export interface TechnicianData {
   }>;
 }
 
+export interface TeamMember {
+  technician: TechnicianData;
+  confidenceScore: number;
+  role: "Lead" | "Specialist" | "Support";
+  reasoning: string[];
+  availabilityStatus: string;
+}
+
 export interface AlternativeTechnician {
   technician: TechnicianData;
   confidenceScore: number;
@@ -38,11 +46,11 @@ export interface AlternativeTechnician {
 }
 
 export interface MatchAnalysis {
-  topRecommendation: {
-    technician: TechnicianData;
-    confidenceScore: number;
-    reasoning: string[];
-    availabilityStatus: string;
+  teamComposition: {
+    size: number;
+    members: TeamMember[];
+    teamDynamics?: string;
+    coordinationPlan?: string;
   };
   alternatives: AlternativeTechnician[];
   jobAnalysis: {
@@ -53,6 +61,14 @@ export interface MatchAnalysis {
   };
   analysisTimestamp: string;
   fallbackUsed: boolean;
+  
+  // Backward compatibility
+  topRecommendation: {
+    technician: TechnicianData;
+    confidenceScore: number;
+    reasoning: string[];
+    availabilityStatus: string;
+  };
 }
 
 export class ClaudeMatchingService {
@@ -157,7 +173,7 @@ Focus on technical requirements like certifications (UT Level I/II, RT, MT, PT, 
       availability: any[];
       matchScore: number;
     }>
-  ): Promise<AlternativeTechnician[]> {
+  ): Promise<TeamMember[]> {
     if (!this.isConfigured || availableTechnicians.length === 0) {
       return this.fallbackRanking(jobDetails, availableTechnicians);
     }
@@ -177,13 +193,14 @@ Focus on technical requirements like certifications (UT Level I/II, RT, MT, PT, 
       }));
 
       const prompt = `
-Analyze and rank these technicians for the following job:
+Analyze and recommend technician staffing for this job:
 
 Job Details:
 - Type: ${jobDetails.jobType}
 - Location: ${jobDetails.location}
 - Date/Time: ${jobDetails.scheduledDate} at ${jobDetails.scheduledTime}
 - Description: ${jobDetails.bodyPlain}
+- Technicians Required: ${jobDetails.techsNeeded || 1}
 
 Available Technicians:
 ${techniciansData.map(t => `
@@ -192,12 +209,29 @@ ${techniciansData.map(t => `
   Availability: ${t.availability.map(a => `${a.periodType} ${a.startDate}${a.endDate ? ' to ' + a.endDate : ''}`).join('; ')}
 `).join('')}
 
-Please provide a JSON response ranking all technicians with:
-- confidenceScore: 0-100 based on skill match and availability
-- reasoning: Array of specific reasons for the score
-- availabilityStatus: "Excellent", "Good", "Limited", or "Unavailable"
+Task: 
+${Number(jobDetails.techsNeeded) > 1 ? 
+  `Recommend a team of ${jobDetails.techsNeeded} technicians with complementary skills and assign roles:
+   - Primary Lead: Most experienced/certified for job type
+   - Support Members: Complementary skills, safety backup
+   - Consider team dynamics, skill coverage, and coordination` :
+  `Recommend the single best technician for this job`}
 
-Consider certifications matching job type (UT, RT, MT, PT, VT), availability on the job date, and experience indicators.
+Provide JSON response as an ARRAY of recommended technicians:
+[
+  {
+    "name": "Technician Name",
+    "confidenceScore": 0-100,
+    "role": "Lead" | "Specialist" | "Support",
+    "reasoning": ["reason1", "reason2"],
+    "availabilityStatus": "Excellent" | "Good" | "Limited" | "Unavailable",
+    "teamDynamics": "Brief explanation (for multi-tech jobs only)",
+    "coordinationPlan": "Leadership plan (for multi-tech jobs only)"
+  }
+]
+
+Consider: certifications matching job type (UT, RT, MT, PT, VT), availability, experience levels, team compatibility.
+Return ONLY the JSON array, no other text.
 `;
 
       const response = await fetch(ANTHROPIC_API_URL, {
@@ -230,31 +264,42 @@ Consider certifications matching job type (UT, RT, MT, PT, VT), availability on 
 
       const rankings = JSON.parse(content.text);
       
-      // Map Claude results back to our technician data
-      const rankedTechnicians: AlternativeTechnician[] = rankings.map((ranking: any) => {
+      // Ensure rankings is an array
+      if (!Array.isArray(rankings)) {
+        logger.warn("Claude returned non-array response, using fallback", { rankingsType: typeof rankings });
+        return this.fallbackRanking(jobDetails, availableTechnicians);
+      }
+
+      // Map Claude results to team members
+      const teamMembers: TeamMember[] = rankings.map((ranking: any) => {
         const technicianData = techniciansData.find(t => t.name === ranking.name || t.id === ranking.id);
         if (!technicianData) {
           throw new Error(`Technician not found: ${ranking.name || ranking.id}`);
         }
 
+        // Validate role
+        const validRoles = ["Lead", "Specialist", "Support"] as const;
+        const role = validRoles.includes(ranking.role) ? ranking.role : "Support";
+
         return {
           technician: technicianData,
           confidenceScore: Math.max(0, Math.min(100, ranking.confidenceScore || 50)),
+          role,
           reasoning: ranking.reasoning || [`Matched for ${jobDetails.jobType} job`],
           availabilityStatus: ranking.availabilityStatus || "Good"
         };
       });
 
       // Sort by confidence score
-      rankedTechnicians.sort((a, b) => b.confidenceScore - a.confidenceScore);
+      teamMembers.sort((a, b) => b.confidenceScore - a.confidenceScore);
 
       logger.info("Claude technician ranking completed", {
         jobType: jobDetails.jobType,
-        technicianCount: rankedTechnicians.length,
-        topScore: rankedTechnicians[0]?.confidenceScore || 0
+        technicianCount: teamMembers.length,
+        topScore: teamMembers[0]?.confidenceScore || 0
       });
 
-      return rankedTechnicians;
+      return teamMembers;
 
     } catch (error) {
       logger.error("Claude technician ranking failed, using fallback", { error });
@@ -278,24 +323,51 @@ Consider certifications matching job type (UT, RT, MT, PT, VT), availability on 
 
     try {
       // Get job analysis and technician rankings
-      const [jobAnalysis, rankedTechnicians] = await Promise.all([
+      const [jobAnalysis, teamMembers] = await Promise.all([
         this.analyzeJobRequirements(jobDetails),
         this.rankTechnicians(jobDetails, availableTechnicians)
       ]);
 
-      if (rankedTechnicians.length === 0) {
+      if (teamMembers.length === 0) {
         throw new Error("No technicians available for analysis");
       }
 
-      const topRecommendation = rankedTechnicians[0];
-      const alternatives = rankedTechnicians.slice(1);
+      const requiredTeamSize = Number(jobDetails.techsNeeded) || 1;
+      const selectedTeam = teamMembers.slice(0, requiredTeamSize);
+      
+      // Ensure we have a lead for multi-tech teams
+      if (selectedTeam.length > 1 && !selectedTeam.some(m => m.role === "Lead")) {
+        selectedTeam[0].role = "Lead";
+      }
+
+      const alternatives = teamMembers.slice(requiredTeamSize).map(member => ({
+        technician: member.technician,
+        confidenceScore: member.confidenceScore,
+        reasoning: member.reasoning,
+        availabilityStatus: member.availabilityStatus
+      }));
+
+      // Extract team dynamics from team members if available
+      const teamDynamics = selectedTeam.length > 1 
+        ? `Team of ${selectedTeam.length} with ${selectedTeam[0].technician.name} as lead technician`
+        : undefined;
+
+      const coordinationPlan = selectedTeam.length > 1
+        ? `${selectedTeam[0].technician.name} (${selectedTeam[0].role}) leads coordination and technical oversight. Team roles: ${selectedTeam.map(m => `${m.technician.name} (${m.role})`).join(', ')}`
+        : undefined;
 
       const analysis: MatchAnalysis = {
+        teamComposition: {
+          size: selectedTeam.length,
+          members: selectedTeam,
+          teamDynamics,
+          coordinationPlan
+        },
         topRecommendation: {
-          technician: topRecommendation.technician,
-          confidenceScore: topRecommendation.confidenceScore,
-          reasoning: topRecommendation.reasoning,
-          availabilityStatus: topRecommendation.availabilityStatus
+          technician: selectedTeam[0].technician,
+          confidenceScore: selectedTeam[0].confidenceScore,
+          reasoning: selectedTeam[0].reasoning,
+          availabilityStatus: selectedTeam[0].availabilityStatus
         },
         alternatives,
         jobAnalysis,
@@ -306,8 +378,9 @@ Consider certifications matching job type (UT, RT, MT, PT, VT), availability on 
       const responseTime = Date.now() - startTime;
       logger.info("Complete match analysis generated", {
         jobType: jobDetails.jobType,
-        topMatch: topRecommendation.technician.name,
-        score: topRecommendation.confidenceScore,
+        teamSize: selectedTeam.length,
+        topMatch: selectedTeam[0].technician.name,
+        score: selectedTeam[0].confidenceScore,
         alternativeCount: alternatives.length,
         responseTime,
         fallbackUsed
@@ -320,6 +393,12 @@ Consider certifications matching job type (UT, RT, MT, PT, VT), availability on 
       
       // Return basic fallback analysis
       return {
+        teamComposition: {
+          size: 0,
+          members: [],
+          teamDynamics: undefined,
+          coordinationPlan: undefined
+        },
         topRecommendation: {
           technician: {
             id: "unknown",
@@ -395,10 +474,11 @@ Consider certifications matching job type (UT, RT, MT, PT, VT), availability on 
       availability: any[];
       matchScore: number;
     }>
-  ): AlternativeTechnician[] {
+  ): TeamMember[] {
     const jobType = jobDetails.jobType?.toLowerCase() || "";
+    const requiredTeamSize = Number(jobDetails.techsNeeded) || 1;
     
-    return availableTechnicians.map(t => {
+    return availableTechnicians.map((t, index) => {
       const certifications = t.technician.fields["Technician Certifications"] || [];
       let score = 50; // Base score
       
@@ -423,6 +503,13 @@ Consider certifications matching job type (UT, RT, MT, PT, VT), availability on 
         reasoning.push("Has availability records");
       }
 
+      // Assign roles for multi-tech teams
+      let role: "Lead" | "Specialist" | "Support" = "Support";
+      if (requiredTeamSize > 1) {
+        if (index === 0) role = "Lead";
+        else if (score > 70) role = "Specialist";
+      }
+
       return {
         technician: {
           id: t.technician.id,
@@ -431,6 +518,7 @@ Consider certifications matching job type (UT, RT, MT, PT, VT), availability on 
           status: t.technician.fields.Status
         },
         confidenceScore: Math.min(100, Math.max(0, score)),
+        role,
         reasoning,
         availabilityStatus: "Good"
       };
