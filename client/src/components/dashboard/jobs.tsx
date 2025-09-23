@@ -124,7 +124,7 @@ export function Jobs() {
         } catch (error) {
           console.error('Failed to fetch AI analysis:', error);
         } finally {
-          setLoadingAnalysis(new Set([...loadingAnalysis].filter(id => id !== jobId)));
+          setLoadingAnalysis(new Set(Array.from(loadingAnalysis).filter(id => id !== jobId)));
         }
       }
     }
@@ -298,7 +298,7 @@ export function Jobs() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {jobs.map((job) => (
+                  {jobs?.map((job) => (
                     <>
                       <TableRow key={job.id} className="hover:bg-muted/50">
                         <TableCell className="font-mono text-xs text-muted-foreground">
@@ -453,6 +453,77 @@ export function Jobs() {
                                             <Clock className="h-3 w-3" />
                                             <span>Status: {aiAnalysis.get(job.id).aiAnalysis.topRecommendation.availabilityStatus}</span>
                                           </div>
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  )}
+
+                                  {/* Team Composition for Multi-Tech Jobs */}
+                                  {aiAnalysis.get(job.id)?.aiAnalysis?.teamComposition && 
+                                   aiAnalysis.get(job.id).aiAnalysis.teamComposition.size > 1 && (
+                                    <Card className="md:col-span-2">
+                                      <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm flex items-center space-x-2">
+                                          <Users className="h-4 w-4 text-blue-500" />
+                                          <span>Recommended Team ({aiAnalysis.get(job.id).aiAnalysis.teamComposition.size} technicians)</span>
+                                        </CardTitle>
+                                      </CardHeader>
+                                      <CardContent className="pt-0">
+                                        <div className="space-y-4">
+                                          {/* Team Members */}
+                                          <div className="space-y-3">
+                                            {aiAnalysis.get(job.id).aiAnalysis.teamComposition.members.map((member: any, idx: number) => (
+                                              <div key={idx} className="flex items-start space-x-3 p-3 border rounded-lg bg-blue-50/50">
+                                                <div className="flex-shrink-0 mt-1">
+                                                  <User className="h-4 w-4 text-blue-600" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                  <div className="flex items-center justify-between mb-1">
+                                                    <div className="flex items-center space-x-2">
+                                                      <span className="font-medium text-sm">{member.technician.name}</span>
+                                                      <Badge variant={member.role === 'Lead' ? 'default' : member.role === 'Specialist' ? 'secondary' : 'outline'} className="text-xs">
+                                                        {member.role}
+                                                      </Badge>
+                                                    </div>
+                                                    <Badge variant="default" className="text-xs">
+                                                      {member.confidenceScore}% match
+                                                    </Badge>
+                                                  </div>
+                                                  <div className="text-xs text-muted-foreground space-y-1">
+                                                    {member.reasoning?.map((reason: string, reasonIdx: number) => (
+                                                      <div key={reasonIdx} className="flex items-start space-x-1">
+                                                        <span className="text-green-500 mt-0.5 text-xs">✓</span>
+                                                        <span>{reason}</span>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                          
+                                          {/* Team Dynamics & Coordination */}
+                                          {(aiAnalysis.get(job.id).aiAnalysis.teamComposition.teamDynamics || 
+                                            aiAnalysis.get(job.id).aiAnalysis.teamComposition.coordinationPlan) && (
+                                            <div className="space-y-2 p-3 bg-gray-50 rounded-lg border">
+                                              {aiAnalysis.get(job.id).aiAnalysis.teamComposition.teamDynamics && (
+                                                <div className="text-sm">
+                                                  <span className="font-medium text-gray-700">Team Dynamics:</span>
+                                                  <span className="ml-2 text-gray-600">
+                                                    {aiAnalysis.get(job.id).aiAnalysis.teamComposition.teamDynamics}
+                                                  </span>
+                                                </div>
+                                              )}
+                                              {aiAnalysis.get(job.id).aiAnalysis.teamComposition.coordinationPlan && (
+                                                <div className="text-sm">
+                                                  <span className="font-medium text-gray-700">Coordination:</span>
+                                                  <span className="ml-2 text-gray-600">
+                                                    {aiAnalysis.get(job.id).aiAnalysis.teamComposition.coordinationPlan}
+                                                  </span>
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
                                         </div>
                                       </CardContent>
                                     </Card>
