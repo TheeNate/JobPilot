@@ -21,6 +21,7 @@ export interface AirtableError {
 export interface TechnicianFields {
   Name: string;
   Status: "Active" | "Inactive";
+  "Technician Certifications": string[];
 }
 
 export interface AvailabilityFields {
@@ -162,6 +163,7 @@ export class AirtableService {
           const fields = [
             "Name",
             "Status",
+            "Technician Certifications",
           ];
 
           const response = await this.makeRequest<TechnicianFields>(
