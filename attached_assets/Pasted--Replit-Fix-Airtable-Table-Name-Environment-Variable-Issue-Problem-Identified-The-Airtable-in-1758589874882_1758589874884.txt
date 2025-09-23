@@ -1,0 +1,83 @@
+# Replit Fix: Airtable Table Name Environment Variable Issue
+
+## Problem Identified
+
+The Airtable integration is failing because it's trying to access the wrong table name. Debug logs show:
+
+**Current Behavior:**
+- App tries to access table: "Employees" 
+- Gets 403 Forbidden error
+- Table "Employees" doesn't exist in the Airtable base
+
+**Expected Behavior:**
+- App should try table: "Technicians"
+- This table exists and works with direct curl commands
+
+## Root Cause
+
+The environment variable `AIRTABLE_TECHNICIANS_TABLE` is likely set to "Employees" which overrides the default table name logic in the code.
+
+In `server/services/airtable.ts`, this code section causes the issue:
+```typescript
+const tableNameEnv = process.env.AIRTABLE_TECHNICIANS_TABLE;
+if (tableNameEnv) {
+  possibleTableNames.unshift(tableNameEnv); // This puts the env var first
+}
+```
+
+## Required Fix
+
+**Task 1: Check Environment Variables**
+- Look for any environment variable named `AIRTABLE_TECHNICIANS_TABLE`
+- If it exists and is set to "Employees", either:
+  - Delete the variable entirely (recommended)
+  - Or change its value to "Technicians"
+
+**Task 2: Verify Correct Environment Variables**
+Ensure only these Airtable environment variables exist:
+```
+AIRTABLE_API_KEY=pat_[your_token]
+AIRTABLE_BASE_ID=appkNlYbSt9EWFcnD
+```
+
+**Task 3: Remove Incorrect Variables**
+Delete any of these if they exist:
+- `AIRTABLE_TECHNICIANS_TABLE` (unless set to "Technicians")
+- `AIRTABLE_AVAILABILITY_TABLE` (not needed)
+- Any other AIRTABLE_* variables
+
+## Environment Variable Location in Replit
+
+Environment variables in Replit are typically found in:
+1. **Secrets tab** in the left sidebar (key-value pairs)
+2. **Environment** section in project settings
+3. **Shell tab** - can check with `printenv | grep AIRTABLE`
+
+## Expected Result After Fix
+
+After removing the incorrect environment variable and restarting:
+
+1. **Debug logs should show:**
+   ```
+   endpoint: '/appkNlYbSt9EWFcnD/Technicians'
+   ```
+   (Instead of '/appkNlYbSt9EWFcnD/Employees')
+
+2. **API calls should succeed** returning technician data instead of 403 errors
+
+3. **Endpoints should work:**
+   - `/api/technicians/available?date=2024-09-22` returns actual technicians
+   - `/api/airtable/health` shows healthy status
+   - `/api/airtable/sync` processes records successfully
+
+## Verification Steps
+
+After making the fix:
+1. Restart the application
+2. Test: `/api/technicians/available?date=2024-09-22`
+3. Check logs show "endpoint: '/appkNlYbSt9EWFcnD/Technicians'" 
+4. Verify response contains actual technician data instead of empty array
+
+## Context
+
+This fixes the core issue preventing the Airtable integration from working. The table "Technicians" exists and contains the expected data (confirmed by successful curl commands), but the app was being misdirected to query a non-existent "Employees" table due to environment variable misconfiguration.

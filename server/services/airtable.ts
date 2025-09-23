@@ -20,8 +20,6 @@ export interface AirtableError {
 // Technician data interfaces
 export interface TechnicianFields {
   Name: string;
-  "Employee ID": string;
-  "Technician Certifications"?: string[];
   Status: "Active" | "Inactive";
 }
 
@@ -163,8 +161,6 @@ export class AirtableService {
           const filterFormula = `{Status} = 'Active'`;
           const fields = [
             "Name",
-            "Employee ID",
-            "Technician Certifications",
             "Status",
           ];
 
@@ -409,45 +405,20 @@ export class AirtableService {
   }
 
   /**
-   * Calculate match score based on technician certifications and job requirements
+   * Calculate match score based on technician and job requirements
    */
   private calculateMatchScore(
     technician: TechnicianFields,
     jobType?: string,
   ): number {
-    if (!jobType || !technician["Technician Certifications"]) {
-      return 50; // Base score when no job type or certifications
+    if (!jobType) {
+      return 50; // Base score when no job type specified
     }
 
-    const certifications = technician["Technician Certifications"];
-    const jobTypeLower = jobType.toLowerCase();
-    let score = 50; // Base score
-
-    // Exact certification matches
-    for (const cert of certifications) {
-      const certLower = cert.toLowerCase();
-
-      // Direct job type matches
-      if (
-        certLower.includes(jobTypeLower) ||
-        jobTypeLower.includes(certLower)
-      ) {
-        score += 30;
-      }
-
-      // Specific skill matches
-      if (jobTypeLower.includes("ut") && certLower.includes("ut")) score += 25;
-      if (jobTypeLower.includes("rt") && certLower.includes("rt")) score += 25;
-      if (jobTypeLower.includes("welding") && certLower.includes("weld"))
-        score += 25;
-      if (jobTypeLower.includes("rope") && certLower.includes("rope"))
-        score += 25;
-      if (jobTypeLower.includes("inspection") && certLower.includes("inspect"))
-        score += 15;
-      if (jobTypeLower.includes("safety") && certLower.includes("osha"))
-        score += 15;
-    }
-
+    // For now, return base score since we don't have certification data
+    // This can be enhanced later when certification fields are added back
+    let score = 50; // Base score for now
+    
     return Math.min(score, 100); // Cap at 100%
   }
 
