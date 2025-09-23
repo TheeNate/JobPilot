@@ -211,13 +211,13 @@ ${techniciansData.map(t => `
 
 Task: 
 ${Number(jobDetails.techsNeeded) > 1 ? 
-  `Recommend a team of ${jobDetails.techsNeeded} technicians with complementary skills and assign roles:
-   - Primary Lead: Most experienced/certified for job type
-   - Support Members: Complementary skills, safety backup
-   - Consider team dynamics, skill coverage, and coordination` :
-  `Recommend the single best technician for this job`}
+  `Rank ALL available technicians for this ${jobDetails.techsNeeded}-person team job. 
+   Assign roles to each technician (Lead, Specialist, Support) based on qualifications.
+   Consider: skill matching, team dynamics, coordination capabilities, safety factors.
+   Return ALL ${techniciansData.length} technicians ranked from best to worst fit.` :
+  `Rank ALL available technicians for this single-technician job from best to worst fit.`}
 
-Provide JSON response as an ARRAY of recommended technicians:
+Provide JSON response as an ARRAY of ALL ${techniciansData.length} technicians ranked by suitability:
 [
   {
     "name": "Technician Name",
