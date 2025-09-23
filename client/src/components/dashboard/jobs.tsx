@@ -2,7 +2,7 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2, Users, Star } from "lucide-react";
+import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2, Users, Star, UserCheck } from "lucide-react";
 import { format } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -60,6 +60,27 @@ export function Jobs() {
       toast({
         title: "Delete failed",
         description: error.message || "Failed to delete job request.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const matchTechniciansMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      const response = await apiRequest(`/api/jobs/${jobId}/match-technicians`, "POST");
+      return response;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+      toast({
+        title: "Technicians matched",
+        description: "Proposed staffing has been updated with available technicians.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Matching failed",
+        description: error.message || "Failed to match technicians for this job.",
         variant: "destructive",
       });
     },
@@ -318,16 +339,29 @@ export function Jobs() {
                         </span>
                       </TableCell>
                       <TableCell className="text-center">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(job.id, job.clientEmail)}
-                          disabled={deleteMutation.isPending}
-                          className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
-                          data-testid={`button-delete-${job.id}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center justify-center space-x-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => matchTechniciansMutation.mutate(job.id)}
+                            disabled={matchTechniciansMutation.isPending}
+                            className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                            data-testid={`button-match-${job.id}`}
+                            title="Match available technicians to this job"
+                          >
+                            <UserCheck className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(job.id, job.clientEmail)}
+                            disabled={deleteMutation.isPending}
+                            className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            data-testid={`button-delete-${job.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

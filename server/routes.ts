@@ -237,8 +237,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           technician: {
             id: result.technician.id,
             name: result.technician.fields.Name,
-            employeeId: result.technician.fields["Employee ID"],
-            certifications: result.technician.fields.Certifications || [],
+            certifications: [],
             status: result.technician.fields.Status
           },
           matchScore: result.matchScore,
@@ -329,6 +328,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responseTime
       });
       
+      // Update the job with proposed staffing if we found technicians
+      if (availableTechnicians.length > 0) {
+        const bestMatch = availableTechnicians[0]; // Get the highest scoring technician
+        const proposedStaffingText = `${bestMatch.technician.fields.Name} (${bestMatch.matchScore}% match)`;
+        
+        await storage.updateJobStaffing(jobId, proposedStaffingText, bestMatch.matchScore);
+      }
+
       res.json({
         status: "success",
         data: {
@@ -340,23 +347,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             jobType: job.jobType,
             techsNeeded: job.techsNeeded
           },
-          proposedStaffing: availableTechnicians.map(result => ({
-            technician: {
-              id: result.technician.id,
-              name: result.technician.fields.Name,
-              employeeId: result.technician.fields["Employee ID"],
-              certifications: result.technician.fields.Certifications || [],
-              status: result.technician.fields.Status
-            },
-            matchScore: result.matchScore,
-            reasoning: generateMatchReasoning(result.technician.fields, jobType, result.matchScore),
-            availability: result.availability.map(avail => ({
-              periodType: avail.fields["Period Type"],
-              startDate: avail.fields["Start Date"],
-              endDate: avail.fields["End Date"],
-              reason: avail.fields.Reason
-            }))
-          })),
+          proposedStaffing: availableTechnicians,
           metadata: {
             requestDate: jobDate,
             totalMatches: availableTechnicians.length,
