@@ -2,10 +2,14 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2, Users, Star, UserCheck } from "lucide-react";
+import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2, Users, Star, UserCheck, Loader2, ChevronDown, ChevronUp, Brain, Award } from "lucide-react";
 import { format } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useState } from "react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Badge } from "@/components/ui/badge";
+
 
 interface Job {
   id: string;
@@ -27,13 +31,18 @@ interface Job {
 export function Jobs() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [aiAnalysis, setAiAnalysis] = useState<Map<string, any>>(new Map());
+  const [loadingAnalysis, setLoadingAnalysis] = useState<Set<string>>(new Set());
+
 
   const { data: jobs, isLoading, error, refetch } = useQuery<Job[]>({
     queryKey: ["/api/jobs"],
     refetchInterval: 5000, // Refresh every 5 seconds
   });
 
-  const deleteMutation = useMutation({
+  const deleteJobMutation = useMutation({
     mutationFn: async (jobId: string) => {
       const response = await fetch(`/api/jobs/${jobId}`, {
         method: "DELETE",
@@ -41,12 +50,12 @@ export function Jobs() {
           "Content-Type": "application/json",
         },
       });
-      
+
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.message || "Failed to delete job");
       }
-      
+
       return response.json();
     },
     onSuccess: () => {
@@ -63,6 +72,9 @@ export function Jobs() {
         variant: "destructive",
       });
     },
+    onSettled: () => {
+      setDeletingJobId(null);
+    }
   });
 
   const matchTechniciansMutation = useMutation({
@@ -86,9 +98,43 @@ export function Jobs() {
     },
   });
 
+  const toggleRowExpansion = async (jobId: string) => {
+    const newExpanded = new Set(expandedRows);
+
+    if (expandedRows.has(jobId)) {
+      newExpanded.delete(jobId);
+    } else {
+      newExpanded.add(jobId);
+
+      // Fetch AI analysis if not already loaded
+      if (!aiAnalysis.has(jobId) && !loadingAnalysis.has(jobId)) {
+        setLoadingAnalysis(new Set(loadingAnalysis).add(jobId));
+
+        try {
+          const response = await fetch(`/api/jobs/${jobId}/match-technicians`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            setAiAnalysis(new Map(aiAnalysis).set(jobId, data.data));
+          }
+        } catch (error) {
+          console.error('Failed to fetch AI analysis:', error);
+        } finally {
+          setLoadingAnalysis(new Set([...loadingAnalysis].filter(id => id !== jobId)));
+        }
+      }
+    }
+
+    setExpandedRows(newExpanded);
+  };
+
   const handleDelete = async (jobId: string, clientEmail: string) => {
     if (window.confirm(`Are you sure you want to delete the job request from ${clientEmail}? This action cannot be undone.`)) {
-      deleteMutation.mutate(jobId);
+      deleteJobMutation.mutate(jobId);
     }
   };
 
@@ -252,69 +298,41 @@ export function Jobs() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {jobs?.map((job) => (
-                    <TableRow key={job.id} data-testid={`row-job-${job.id}`}>
-                      <TableCell className="text-sm">
-                        <div className="flex flex-col">
-                          <span data-testid={`text-timestamp-${job.id}`}>
-                            {format(new Date(job.createdAt), "MMM dd")}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {format(new Date(job.createdAt), "HH:mm")}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-medium" data-testid={`text-email-${job.id}`}>
-                            {job.clientEmail}
-                          </span>
-                          <span className="text-xs text-muted-foreground truncate max-w-[180px]">
-                            {job.subject}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell data-testid={`text-location-${job.id}`}>
-                        {job.location ? (
-                          <span className="text-sm">{job.location}</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground italic">Not parsed</span>
-                        )}
-                      </TableCell>
-                      <TableCell data-testid={`text-date-${job.id}`}>
-                        {job.scheduledDate ? (
-                          <span className="text-sm">{job.scheduledDate}</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground italic">Not parsed</span>
-                        )}
-                      </TableCell>
-                      <TableCell data-testid={`text-time-${job.id}`}>
-                        {job.scheduledTime ? (
-                          <span className="text-sm">{job.scheduledTime}</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground italic">Not parsed</span>
-                        )}
-                      </TableCell>
-                      <TableCell data-testid={`text-jobtype-${job.id}`}>
-                        {job.jobType ? (
-                          <span className="text-sm capitalize">{job.jobType}</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground italic">Not parsed</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-center" data-testid={`text-techs-${job.id}`}>
-                        {job.techsNeeded ? (
-                          <span className="text-sm font-medium">{job.techsNeeded}</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground italic">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell data-testid={`text-staffing-${job.id}`}>
-                        {job.proposedStaffing ? (
-                          <div className="flex items-center space-x-2">
-                            <Users className="h-4 w-4 text-blue-500" />
-                            <div className="flex flex-col">
-                              <span className="text-sm">{job.proposedStaffing}</span>
+                  {jobs.map((job) => (
+                    <>
+                      <TableRow key={job.id} className="hover:bg-muted/50">
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {format(new Date(job.createdAt), "MMM dd, yyyy HH:mm")}
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate">
+                          {job.clientEmail}
+                        </TableCell>
+                        <TableCell className="max-w-[150px] truncate">
+                          {job.location || 'Not specified'}
+                        </TableCell>
+                        <TableCell>{job.scheduledDate || '-'}</TableCell>
+                        <TableCell>{job.scheduledTime || '-'}</TableCell>
+                        <TableCell>
+                          {job.jobType ? (
+                            <Badge variant="outline" className="font-normal">
+                              {job.jobType}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-sm">Not specified</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {job.techsNeeded || '-'}
+                        </TableCell>
+                        <TableCell>
+                          {job.proposedStaffing ? (
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <Users className="h-4 w-4 text-blue-500" />
+                                <span className="text-sm font-medium truncate max-w-[120px]" title={job.proposedStaffing}>
+                                  {job.proposedStaffing}
+                                </span>
+                              </div>
                               {job.matchScore && (
                                 <div className="flex items-center space-x-1">
                                   <Star className="h-3 w-3 text-yellow-500 fill-current" />
@@ -322,48 +340,206 @@ export function Jobs() {
                                 </div>
                               )}
                             </div>
-                          </div>
-                        ) : (
-                          <div className="flex items-center space-x-2 text-muted-foreground">
-                            <Users className="h-4 w-4 opacity-50" />
-                            <span className="text-xs italic">No match yet</span>
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <span 
-                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(job.status)}`}
-                          data-testid={`status-${job.id}`}
-                        >
-                          {job.status}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <div className="flex items-center justify-center space-x-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => matchTechniciansMutation.mutate(job.id)}
-                            disabled={matchTechniciansMutation.isPending}
-                            className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                            data-testid={`button-match-${job.id}`}
-                            title="Match available technicians to this job"
+                          ) : (
+                            <div className="flex items-center space-x-2 text-muted-foreground">
+                              <Users className="h-4 w-4 opacity-50" />
+                              <span className="text-xs italic">No match yet</span>
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <span 
+                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(job.status)}`}
+                            data-testid={`status-${job.id}`}
                           >
-                            <UserCheck className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(job.id, job.clientEmail)}
-                            disabled={deleteMutation.isPending}
-                            className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
-                            data-testid={`button-delete-${job.id}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                            {job.status}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex items-center justify-center space-x-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleRowExpansion(job.id)}
+                              disabled={loadingAnalysis.has(job.id)}
+                              title="View AI Analysis"
+                            >
+                              {loadingAnalysis.has(job.id) ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : expandedRows.has(job.id) ? (
+                                <ChevronUp className="h-4 w-4" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => matchTechniciansMutation.mutate(job.id)}
+                              disabled={matchTechniciansMutation.isPending && matchTechniciansMutation.variables === job.id}
+                              title="Match Technicians"
+                            >
+                              {matchTechniciansMutation.isPending && matchTechniciansMutation.variables === job.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Users className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setDeletingJobId(job.id);
+                                deleteJobMutation.mutate(job.id);
+                              }}
+                              disabled={deletingJobId === job.id}
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              title="Delete Job"
+                            >
+                              {deletingJobId === job.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+
+                      {expandedRows.has(job.id) && (
+                        <TableRow key={`${job.id}-expanded`}>
+                          <TableCell colSpan={10} className="p-0">
+                            <div className="border-t bg-muted/30 p-4 space-y-4">
+                              <div className="flex items-center space-x-2 text-sm font-medium text-muted-foreground">
+                                <Brain className="h-4 w-4" />
+                                <span>AI Analysis for {job.jobType || 'Job'}</span>
+                              </div>
+
+                              {loadingAnalysis.has(job.id) ? (
+                                <div className="flex items-center justify-center py-8">
+                                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                                  <span>Analyzing job requirements and technician matches...</span>
+                                </div>
+                              ) : aiAnalysis.has(job.id) ? (
+                                <div className="grid gap-4 md:grid-cols-2">
+                                  {/* Top Recommendation */}
+                                  {aiAnalysis.get(job.id)?.aiAnalysis?.topRecommendation && (
+                                    <Card>
+                                      <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm flex items-center space-x-2">
+                                          <Star className="h-4 w-4 text-yellow-500" />
+                                          <span>Top Recommendation</span>
+                                        </CardTitle>
+                                      </CardHeader>
+                                      <CardContent className="pt-0">
+                                        <div className="space-y-2">
+                                          <div className="flex items-center justify-between">
+                                            <span className="font-medium">
+                                              {aiAnalysis.get(job.id).aiAnalysis.topRecommendation.technician.name}
+                                            </span>
+                                            <Badge variant="default">
+                                              {aiAnalysis.get(job.id).aiAnalysis.topRecommendation.confidenceScore}% match
+                                            </Badge>
+                                          </div>
+                                          <div className="text-sm text-muted-foreground space-y-1">
+                                            {aiAnalysis.get(job.id).aiAnalysis.topRecommendation.reasoning?.map((reason: string, idx: number) => (
+                                              <div key={idx} className="flex items-start space-x-2">
+                                                <span className="text-green-500 mt-0.5">✓</span>
+                                                <span>{reason}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                          <div className="flex items-center space-x-2 text-xs text-muted-foreground">
+                                            <Clock className="h-3 w-3" />
+                                            <span>Status: {aiAnalysis.get(job.id).aiAnalysis.topRecommendation.availabilityStatus}</span>
+                                          </div>
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  )}
+
+                                  {/* Job Analysis */}
+                                  {aiAnalysis.get(job.id)?.aiAnalysis?.jobAnalysis && (
+                                    <Card>
+                                      <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm flex items-center space-x-2">
+                                          <Award className="h-4 w-4 text-blue-500" />
+                                          <span>Job Analysis</span>
+                                        </CardTitle>
+                                      </CardHeader>
+                                      <CardContent className="pt-0">
+                                        <div className="space-y-2">
+                                          <div className="flex items-center justify-between text-sm">
+                                            <span>Complexity:</span>
+                                            <Badge variant={aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.complexity === 'complex' ? 'destructive' : aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.complexity === 'moderate' ? 'default' : 'secondary'}>
+                                              {aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.complexity}
+                                            </Badge>
+                                          </div>
+                                          <div className="text-sm">
+                                            <span className="font-medium">Required Skills:</span>
+                                            <div className="mt-1 flex flex-wrap gap-1">
+                                              {aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.requiredSkills?.map((skill: string, idx: number) => (
+                                                <Badge key={idx} variant="outline" className="text-xs">
+                                                  {skill}
+                                                </Badge>
+                                              ))}
+                                            </div>
+                                          </div>
+                                          <div className="text-sm">
+                                            <span className="font-medium">Duration:</span>
+                                            <span className="ml-2 text-muted-foreground">
+                                              {aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.estimatedDuration}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  )}
+
+                                  {/* Alternative Options */}
+                                  {aiAnalysis.get(job.id)?.aiAnalysis?.alternatives?.length > 0 && (
+                                    <Card className="md:col-span-2">
+                                      <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm">Alternative Options</CardTitle>
+                                      </CardHeader>
+                                      <CardContent className="pt-0">
+                                        <div className="space-y-2">
+                                          {aiAnalysis.get(job.id).aiAnalysis.alternatives.slice(0, 3).map((alt: any, idx: number) => (
+                                            <div key={idx} className="flex items-center justify-between p-2 border rounded-sm">
+                                              <div className="flex-1">
+                                                <div className="flex items-center space-x-2">
+                                                  <span className="font-medium text-sm">{alt.technician.name}</span>
+                                                  <Badge variant="outline" className="text-xs">
+                                                    {alt.confidenceScore}% match
+                                                  </Badge>
+                                                </div>
+                                                <div className="text-xs text-muted-foreground mt-1">
+                                                  {alt.reasoning?.[0] || 'Good alternative option'}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-center py-4 text-muted-foreground">
+                                  <p>Click the dropdown button above to load AI analysis</p>
+                                </div>
+                              )}
+
+                              {aiAnalysis.get(job.id)?.aiAnalysis?.fallbackUsed && (
+                                <div className="mt-2 text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">
+                                  ⚠️ AI analysis unavailable - using enhanced logic-based matching
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
                   ))}
                 </TableBody>
               </Table>

@@ -106,7 +106,7 @@ Focus on technical requirements like certifications (UT Level I/II, RT, MT, PT, 
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-3-sonnet-20240229',
+          model: 'claude-3-5-sonnet-20241022',
           max_tokens: 1000,
           messages: [{
             role: 'user',
@@ -208,7 +208,7 @@ Consider certifications matching job type (UT, RT, MT, PT, VT), availability on 
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-3-sonnet-20240229',
+          model: 'claude-3-5-sonnet-20241022',
           max_tokens: 2000,
           messages: [{
             role: 'user',

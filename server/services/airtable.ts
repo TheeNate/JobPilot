@@ -244,7 +244,7 @@ export class AirtableService {
 
       const fields = [
         "Technician",
-        "Period Type",
+        "Period Type", 
         "Start Date",
         "End Date",
         "Reason",
@@ -419,50 +419,78 @@ export class AirtableService {
     }
 
     // Enhanced logic-based scoring with certification matching
-    let score = 40; // Lower base score to differentiate from AI results
+    let score = 35; // Lower base score to differentiate from AI results
 
     // Certification matching
     const certifications = technician["Technician Certifications"] || [];
     const jobTypeLower = jobType.toLowerCase();
 
-    // Exact certification matches
-    if (jobTypeLower.includes("ut") && certifications.some(c => c.toLowerCase().includes("ut"))) {
-      score += 30; // Strong match for UT jobs
+    // Exact certification matches with level considerations
+    if (jobTypeLower.includes("ut") || jobTypeLower.includes("ultrasonic")) {
+      if (certifications.some(c => c.toLowerCase().includes("ut level ii") || c.toLowerCase().includes("ut-2"))) {
+        score += 35; // Excellent match for UT Level II
+      } else if (certifications.some(c => c.toLowerCase().includes("ut level i") || c.toLowerCase().includes("ut-1") || c.toLowerCase().includes("ut"))) {
+        score += 25; // Good match for UT Level I or general UT
+      }
     }
-    if (jobTypeLower.includes("rt") && certifications.some(c => c.toLowerCase().includes("rt"))) {
-      score += 30; // Strong match for RT jobs  
+    
+    if (jobTypeLower.includes("rt") || jobTypeLower.includes("radiograph")) {
+      if (certifications.some(c => c.toLowerCase().includes("rt level ii") || c.toLowerCase().includes("rt-2"))) {
+        score += 35; // Excellent match for RT Level II
+      } else if (certifications.some(c => c.toLowerCase().includes("rt level i") || c.toLowerCase().includes("rt-1") || c.toLowerCase().includes("rt"))) {
+        score += 25; // Good match for RT Level I or general RT
+      }
     }
-    if (jobTypeLower.includes("mt") && certifications.some(c => c.toLowerCase().includes("mt"))) {
-      score += 25; // Good match for MT jobs
+    
+    if (jobTypeLower.includes("mt") || jobTypeLower.includes("magnetic")) {
+      if (certifications.some(c => c.toLowerCase().includes("mt"))) {
+        score += 30; // Strong match for MT jobs
+      }
     }
-    if (jobTypeLower.includes("pt") && certifications.some(c => c.toLowerCase().includes("pt"))) {
-      score += 25; // Good match for PT jobs
+    
+    if (jobTypeLower.includes("pt") || jobTypeLower.includes("penetrant")) {
+      if (certifications.some(c => c.toLowerCase().includes("pt"))) {
+        score += 30; // Strong match for PT jobs
+      }
     }
-    if (jobTypeLower.includes("vt") && certifications.some(c => c.toLowerCase().includes("vt"))) {
-      score += 20; // Good match for VT jobs
+    
+    if (jobTypeLower.includes("vt") || jobTypeLower.includes("visual")) {
+      if (certifications.some(c => c.toLowerCase().includes("vt"))) {
+        score += 25; // Good match for VT jobs
+      }
     }
 
     // General NDT experience indicators
-    const ndt_keywords = ["ndt", "non-destructive", "testing", "inspection"];
+    const ndt_keywords = ["ndt", "non-destructive", "testing", "inspection", "asnt"];
     if (ndt_keywords.some(keyword => 
       certifications.some(c => c.toLowerCase().includes(keyword))
     )) {
-      score += 15; // General NDT experience bonus
+      score += 10; // General NDT experience bonus
     }
 
     // Multiple certifications bonus (shows breadth of experience)
-    if (certifications.length >= 3) {
-      score += 10;
+    if (certifications.length >= 4) {
+      score += 15; // Very experienced
+    } else if (certifications.length >= 3) {
+      score += 10; // Well-rounded
     } else if (certifications.length >= 2) {
-      score += 5;
+      score += 5; // Some variety
     }
 
-    // Safety certifications (important for industrial work)
-    const safety_keywords = ["rope", "access", "confined", "space", "safety", "osha"];
+    // Safety certifications (critical for industrial work)
+    const safety_keywords = ["rope", "access", "confined", "space", "safety", "osha", "cswip", "nace"];
     if (safety_keywords.some(keyword => 
       certifications.some(c => c.toLowerCase().includes(keyword))
     )) {
-      score += 10; // Safety certification bonus
+      score += 12; // Safety certification bonus
+    }
+
+    // Industry-specific certifications
+    const industry_keywords = ["aws", "asme", "api", "pipeline", "offshore", "subsea"];
+    if (industry_keywords.some(keyword => 
+      certifications.some(c => c.toLowerCase().includes(keyword))
+    )) {
+      score += 8; // Industry specialization bonus
     }
     
     return Math.min(score, 100); // Cap at 100%
