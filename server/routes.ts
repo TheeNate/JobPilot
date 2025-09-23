@@ -5,6 +5,7 @@ import { insertJobSchema, insertRequestLogSchema, jobs, jobAssignments } from "@
 import { logger } from "./services/logger";
 import { EmailParser } from "./services/parser";
 import { airtableService } from "./services/airtable";
+import { claudeMatchingService } from "./services/claude-matching";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
@@ -305,10 +306,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use requirement overrides if provided, otherwise use job details
       const jobType = requirementOverrides?.jobType || job.jobType;
       
+      // Get available technicians first
       const availableTechnicians = await airtableService.findAvailableTechnicians(
         jobDate,
         jobType
       );
+
+      // Try Claude AI analysis for intelligent matching
+      let aiAnalysis = null;
+      try {
+        if (availableTechnicians.length > 0) {
+          const jobDetails = {
+            location: job.location || "",
+            scheduledDate: job.scheduledDate || "",
+            scheduledTime: job.scheduledTime || "",
+            jobType: jobType || "",
+            subject: job.subject || "",
+            bodyPlain: job.bodyPlain || "",
+            techsNeeded: job.techsNeeded?.toString() || null
+          };
+
+          aiAnalysis = await claudeMatchingService.generateMatchAnalysis(jobDetails, availableTechnicians);
+          
+          logger.info("AI analysis completed", {
+            jobId,
+            topRecommendation: aiAnalysis.topRecommendation.technician.name,
+            confidenceScore: aiAnalysis.topRecommendation.confidenceScore,
+            fallbackUsed: aiAnalysis.fallbackUsed
+          });
+        }
+      } catch (error) {
+        logger.error("AI analysis failed, using standard matching", { error });
+        aiAnalysis = null;
+      }
       
       // Log the request
       const responseTime = Date.now() - startTime;
@@ -348,6 +378,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             techsNeeded: job.techsNeeded
           },
           proposedStaffing: availableTechnicians,
+          aiAnalysis: aiAnalysis ? {
+            topRecommendation: aiAnalysis.topRecommendation,
+            alternatives: aiAnalysis.alternatives,
+            jobAnalysis: aiAnalysis.jobAnalysis,
+            analysisTimestamp: aiAnalysis.analysisTimestamp,
+            fallbackUsed: aiAnalysis.fallbackUsed
+          } : null,
           metadata: {
             requestDate: jobDate,
             totalMatches: availableTechnicians.length,

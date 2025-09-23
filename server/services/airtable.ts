@@ -1,4 +1,5 @@
 import { logger } from "./logger";
+import { claudeMatchingService } from "./claude-matching";
 
 // Airtable API response interfaces
 export interface AirtableRecord<T = any> {
@@ -417,9 +418,52 @@ export class AirtableService {
       return 50; // Base score when no job type specified
     }
 
-    // For now, return base score since we don't have certification data
-    // This can be enhanced later when certification fields are added back
-    let score = 50; // Base score for now
+    // Enhanced logic-based scoring with certification matching
+    let score = 40; // Lower base score to differentiate from AI results
+
+    // Certification matching
+    const certifications = technician["Technician Certifications"] || [];
+    const jobTypeLower = jobType.toLowerCase();
+
+    // Exact certification matches
+    if (jobTypeLower.includes("ut") && certifications.some(c => c.toLowerCase().includes("ut"))) {
+      score += 30; // Strong match for UT jobs
+    }
+    if (jobTypeLower.includes("rt") && certifications.some(c => c.toLowerCase().includes("rt"))) {
+      score += 30; // Strong match for RT jobs  
+    }
+    if (jobTypeLower.includes("mt") && certifications.some(c => c.toLowerCase().includes("mt"))) {
+      score += 25; // Good match for MT jobs
+    }
+    if (jobTypeLower.includes("pt") && certifications.some(c => c.toLowerCase().includes("pt"))) {
+      score += 25; // Good match for PT jobs
+    }
+    if (jobTypeLower.includes("vt") && certifications.some(c => c.toLowerCase().includes("vt"))) {
+      score += 20; // Good match for VT jobs
+    }
+
+    // General NDT experience indicators
+    const ndt_keywords = ["ndt", "non-destructive", "testing", "inspection"];
+    if (ndt_keywords.some(keyword => 
+      certifications.some(c => c.toLowerCase().includes(keyword))
+    )) {
+      score += 15; // General NDT experience bonus
+    }
+
+    // Multiple certifications bonus (shows breadth of experience)
+    if (certifications.length >= 3) {
+      score += 10;
+    } else if (certifications.length >= 2) {
+      score += 5;
+    }
+
+    // Safety certifications (important for industrial work)
+    const safety_keywords = ["rope", "access", "confined", "space", "safety", "osha"];
+    if (safety_keywords.some(keyword => 
+      certifications.some(c => c.toLowerCase().includes(keyword))
+    )) {
+      score += 10; // Safety certification bonus
+    }
     
     return Math.min(score, 100); // Cap at 100%
   }
