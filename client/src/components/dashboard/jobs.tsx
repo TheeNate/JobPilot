@@ -67,7 +67,7 @@ export function Jobs() {
 
   const matchTechniciansMutation = useMutation({
     mutationFn: async (jobId: string) => {
-      const response = await apiRequest(`/api/jobs/${jobId}/match-technicians`, "POST");
+      const response = await apiRequest("POST", `/api/jobs/${jobId}/match-technicians`);
       return response;
     },
     onSuccess: () => {
