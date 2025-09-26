@@ -458,6 +458,44 @@ export function Jobs() {
                                     </Card>
                                   )}
 
+                                  {/* Job Analysis */}
+                                  {aiAnalysis.get(job.id)?.aiAnalysis?.jobAnalysis && (
+                                    <Card>
+                                      <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm flex items-center space-x-2">
+                                          <Award className="h-4 w-4 text-blue-500" />
+                                          <span>Job Analysis</span>
+                                        </CardTitle>
+                                      </CardHeader>
+                                      <CardContent className="pt-0">
+                                        <div className="space-y-2">
+                                          <div className="flex items-center justify-between text-sm">
+                                            <span>Complexity:</span>
+                                            <Badge variant={aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.complexity === 'complex' ? 'destructive' : aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.complexity === 'moderate' ? 'default' : 'secondary'}>
+                                              {aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.complexity}
+                                            </Badge>
+                                          </div>
+                                          <div className="text-sm">
+                                            <span className="font-medium">Required Skills:</span>
+                                            <div className="mt-1 flex flex-wrap gap-1">
+                                              {aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.requiredSkills?.map((skill: string, idx: number) => (
+                                                <Badge key={idx} variant="outline" className="text-xs">
+                                                  {skill}
+                                                </Badge>
+                                              ))}
+                                            </div>
+                                          </div>
+                                          <div className="text-sm">
+                                            <span className="font-medium">Duration:</span>
+                                            <span className="ml-2 text-muted-foreground">
+                                              {aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.estimatedDuration}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  )}
+
                                   {/* Team Composition for Multi-Tech Jobs */}
                                   {aiAnalysis.get(job.id)?.aiAnalysis?.teamComposition && 
                                    aiAnalysis.get(job.id).aiAnalysis.teamComposition.size > 1 && (
@@ -524,44 +562,6 @@ export function Jobs() {
                                               )}
                                             </div>
                                           )}
-                                        </div>
-                                      </CardContent>
-                                    </Card>
-                                  )}
-
-                                  {/* Job Analysis */}
-                                  {aiAnalysis.get(job.id)?.aiAnalysis?.jobAnalysis && (
-                                    <Card>
-                                      <CardHeader className="pb-2">
-                                        <CardTitle className="text-sm flex items-center space-x-2">
-                                          <Award className="h-4 w-4 text-blue-500" />
-                                          <span>Job Analysis</span>
-                                        </CardTitle>
-                                      </CardHeader>
-                                      <CardContent className="pt-0">
-                                        <div className="space-y-2">
-                                          <div className="flex items-center justify-between text-sm">
-                                            <span>Complexity:</span>
-                                            <Badge variant={aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.complexity === 'complex' ? 'destructive' : aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.complexity === 'moderate' ? 'default' : 'secondary'}>
-                                              {aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.complexity}
-                                            </Badge>
-                                          </div>
-                                          <div className="text-sm">
-                                            <span className="font-medium">Required Skills:</span>
-                                            <div className="mt-1 flex flex-wrap gap-1">
-                                              {aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.requiredSkills?.map((skill: string, idx: number) => (
-                                                <Badge key={idx} variant="outline" className="text-xs">
-                                                  {skill}
-                                                </Badge>
-                                              ))}
-                                            </div>
-                                          </div>
-                                          <div className="text-sm">
-                                            <span className="font-medium">Duration:</span>
-                                            <span className="ml-2 text-muted-foreground">
-                                              {aiAnalysis.get(job.id).aiAnalysis.jobAnalysis.estimatedDuration}
-                                            </span>
-                                          </div>
                                         </div>
                                       </CardContent>
                                     </Card>
