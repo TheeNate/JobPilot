@@ -345,14 +345,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Get job details from database
-      const job = await storage.getJobById(jobId);
-      if (!job) {
+      // Get job details from Airtable via middleware
+      const jobResponse = await fetch(`${process.env.MIDDLEWARE_URL}/api/Jobs/${jobId}`, {
+        headers: {
+          'Authorization': `Bearer ${process.env.MIDDLEWARE_KEY}`
+        }
+      });
+
+      if (!jobResponse.ok) {
         return res.status(404).json({
           status: "error",
           message: "Job not found",
         });
       }
+
+      const airtableJob = await jobResponse.json();
+
+      // Transform Airtable format to match expected job structure
+      const job = {
+        id: airtableJob.id,
+        clientEmail: airtableJob.fields.Client || '',
+        subject: airtableJob.fields.Name || '',
+        location: airtableJob.fields.Location || null,
+        scheduledDate: airtableJob.fields['Start Date'] || null,
+        scheduledTime: airtableJob.fields.Time || null,
+        jobType: airtableJob.fields['Job Type'] || null,
+        techsNeeded: airtableJob.fields['Techs Needed'] || null,
+        status: airtableJob.fields.Select || 'pending',
+        bodyPlain: airtableJob.fields['Body Plain'] || ''
+      };
 
       // Use job's scheduled date or current date as fallback
       const jobDate =
@@ -419,11 +440,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const bestMatch = availableTechnicians[0]; // Get the highest scoring technician
         const proposedStaffingText = `${bestMatch.technician.fields.Name} (${bestMatch.matchScore}% match)`;
 
-        await storage.updateJobStaffing(
-          jobId,
-          proposedStaffingText,
-          bestMatch.matchScore,
-        );
+        // Update job in Airtable via middleware
+        try {
+          const updateResponse = await fetch(`${process.env.MIDDLEWARE_URL}/api/Jobs/${jobId}`, {
+            method: 'PATCH',
+            headers: {
+              'Authorization': `Bearer ${process.env.MIDDLEWARE_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              fields: {
+                'Proposed Staffing': proposedStaffingText,
+                'Match Score': bestMatch.matchScore
+              }
+            })
+          });
+
+          if (!updateResponse.ok) {
+            logger.warn('Failed to update job staffing in Airtable', {
+              jobId,
+              status: updateResponse.status
+            });
+          }
+        } catch (error) {
+          logger.error('Error updating job staffing in Airtable', { error, jobId });
+        }
       }
 
       res.json({

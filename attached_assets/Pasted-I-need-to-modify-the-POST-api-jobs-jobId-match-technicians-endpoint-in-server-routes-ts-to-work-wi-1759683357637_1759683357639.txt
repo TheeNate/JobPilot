@@ -1,0 +1,71 @@
+I need to modify the POST /api/jobs/:jobId/match-technicians endpoint in server/routes.ts to work with Airtable job IDs instead of PostgreSQL UUIDs.
+
+CURRENT PROBLEM:
+- Jobs are now stored in Airtable with IDs like "recAc9mcCxaOSMybB"
+- The endpoint tries to look up jobs in PostgreSQL using these Airtable IDs
+- This fails because PostgreSQL expects UUID format
+
+WHAT TO CHANGE:
+
+1. At the start of the endpoint (around line 1513), REPLACE this line:
+   const job = await storage.getJobById(jobId);
+   
+   WITH code that fetches the job from Airtable via middleware:
+   
+   const jobResponse = await fetch(`${process.env.MIDDLEWARE_URL}/api/Jobs/${jobId}`, {
+     headers: {
+       'Authorization': `Bearer ${process.env.MIDDLEWARE_KEY}`
+     }
+   });
+   
+   if (!jobResponse.ok) {
+     throw new Error(`Failed to fetch job from Airtable: ${jobResponse.status}`);
+   }
+   
+   const airtableJob = await jobResponse.json();
+   
+   // Transform Airtable format to match expected job structure
+   const job = {
+     id: airtableJob.id,
+     clientEmail: airtableJob.fields.Client || '',
+     subject: airtableJob.fields.Name || '',
+     location: airtableJob.fields.Location || null,
+     scheduledDate: airtableJob.fields['Start Date'] || null,
+     scheduledTime: airtableJob.fields.Time || null,
+     jobType: airtableJob.fields['Job Type'] || null,
+     techsNeeded: airtableJob.fields['Techs Needed'] || null,
+     status: airtableJob.fields.Select || 'pending'
+   };
+
+2. KEEP all the existing technician matching logic (the Airtable queries and Claude AI analysis) - that already works!
+
+3. KEEP the PostgreSQL storage for matches (storage.createTechnicianMatch) - that's fine for now.
+
+4. At the end where it updates job staffing, REPLACE this line:
+   await storage.updateJobStaffing(jobId, proposedStaffingText, bestMatch.matchScore);
+   
+   WITH code that updates the job in Airtable via middleware:
+   
+   const updateResponse = await fetch(`${process.env.MIDDLEWARE_URL}/api/Jobs/${jobId}`, {
+     method: 'PATCH',
+     headers: {
+       'Authorization': `Bearer ${process.env.MIDDLEWARE_KEY}`,
+       'Content-Type': 'application/json'
+     },
+     body: JSON.stringify({
+       fields: {
+         'Proposed Staffing': proposedStaffingText,
+         'Match Score': bestMatch.matchScore
+       }
+     })
+   });
+   
+   if (!updateResponse.ok) {
+     console.warn('Failed to update job staffing in Airtable');
+   }
+
+IMPORTANT:
+- Make sure to add error handling for the fetch calls
+- The Airtable field names might not exactly match (Location, Time, Job Type, Techs Needed) - adjust if needed
+- Keep all existing logging and error handling logic
+- Don't change the technician matching logic or Claude AI integration
