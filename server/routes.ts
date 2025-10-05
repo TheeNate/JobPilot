@@ -226,7 +226,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const jobs = airtableData.records.map((record: any) => {
         const job = {
         id: record.id,
-        clientEmail: record.fields.Client || "",
+        clientEmail: record.fields["Client Email"] || "",
         subject: record.fields.Name || "",
         status: record.fields.Select || "pending",
         scheduledDate: record.fields["Start Date"] || null,
@@ -430,7 +430,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Transform Airtable format to match expected job structure
       const job = {
         id: airtableJob.id,
-        clientEmail: airtableJob.fields.Client || "",
+        clientEmail: airtableJob.fields["Client Email"] || "",
         subject: airtableJob.fields.Name || "",
         location: airtableJob.fields.Location || null,
         scheduledDate: airtableJob.fields["Start Date"] || null,
@@ -508,6 +508,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Update job in Airtable via middleware
         try {
+          logger.info("Attempting to update job staffing", {
+            jobId,
+            url: `${process.env.MIDDLEWARE_URL}/api/Job%20Intake/${jobId}`,
+            proposedStaffing: proposedStaffingText,
+            matchScore: bestMatch.matchScore,
+          });
+
           const updateResponse = await fetch(
             `${process.env.MIDDLEWARE_URL}/api/Job%20Intake/${jobId}`,
             {
@@ -525,15 +532,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
             },
           );
 
+          const responseText = await updateResponse.text();
+          
           if (!updateResponse.ok) {
             logger.warn("Failed to update job staffing in Airtable", {
               jobId,
               status: updateResponse.status,
+              responseText,
+            });
+          } else {
+            logger.info("Successfully updated job staffing", {
+              jobId,
+              responseText,
             });
           }
         } catch (error) {
           logger.error("Error updating job staffing in Airtable", {
-            error,
+            error: error instanceof Error ? error.message : String(error),
             jobId,
           });
         }
