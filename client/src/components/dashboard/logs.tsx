@@ -45,6 +45,43 @@ export function Logs() {
     return new Date(timestamp).toLocaleTimeString();
   };
 
+  const handleExport = () => {
+    if (!filteredLogs || filteredLogs.length === 0) {
+      return;
+    }
+
+    // Convert logs to CSV format
+    const headers = ['Timestamp', 'Level', 'Method', 'Endpoint', 'Status Code', 'Response Time', 'Message', 'Metadata'];
+    const csvRows = [headers.join(',')];
+
+    filteredLogs.forEach((log: any) => {
+      const row = [
+        log.timestamp || '',
+        log.level || 'INFO',
+        log.method || '',
+        log.endpoint || '',
+        log.statusCode || '',
+        log.responseTime ? `${log.responseTime}ms` : '',
+        log.message || '',
+        log.metadata ? JSON.stringify(log.metadata).replace(/"/g, '""') : ''
+      ];
+      // Escape commas and quotes in CSV
+      const escapedRow = row.map(cell => `"${cell}"`);
+      csvRows.push(escapedRow.join(','));
+    });
+
+    const csvContent = csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `logs-export-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -66,6 +103,8 @@ export function Logs() {
             <Button 
               variant="outline" 
               size="sm"
+              onClick={handleExport}
+              disabled={!filteredLogs || filteredLogs.length === 0}
               data-testid="button-export-logs"
             >
               <Download className="mr-1 h-4 w-4" />
