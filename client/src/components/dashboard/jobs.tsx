@@ -306,7 +306,7 @@ export function Jobs() {
                 <TableBody>
                   {jobs?.map((job) => (
                     <Fragment key={job.id}>
-                      <TableRow className="hover:bg-muted/50">
+                      <TableRow className="hover:bg-muted/50" data-job-id={job.id}>
                         <TableCell className="font-mono text-xs text-muted-foreground">
                           {format(new Date(job.createdAt), "MMM dd, yyyy HH:mm")}
                         </TableCell>

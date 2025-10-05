@@ -214,8 +214,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const airtableData = await response.json();
 
+      // LOG THE RAW AIRTABLE RESPONSE
+      logger.info("Raw Airtable response structure", {
+        recordCount: airtableData.records?.length,
+        firstRecordId: airtableData.records?.[0]?.id,
+        firstRecordFields: airtableData.records?.[0]?.fields,
+        allFieldNames: airtableData.records?.[0] ? Object.keys(airtableData.records[0].fields) : [],
+      });
+
       // Transform Airtable format to match what dashboard expects
-      const jobs = airtableData.records.map((record: any) => ({
+      const jobs = airtableData.records.map((record: any) => {
+        const job = {
         id: record.id,
         clientEmail: record.fields.Client || "",
         subject: record.fields.Name || "",
@@ -230,7 +239,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bodyPlain: record.fields["Email Body"] || "",
         proposedStaffing: record.fields["Proposed Staffing"] || null,
         matchScore: record.fields["Match Score"] || null,
-      }));
+      };
+
+        // LOG EACH TRANSFORMED JOB
+        if (record.id === airtableData.records[0].id) {
+          logger.info("First transformed job data", {
+            jobId: job.id,
+            proposedStaffing: job.proposedStaffing,
+            matchScore: job.matchScore,
+            hasProposedStaffing: !!job.proposedStaffing,
+            rawProposedStaffing: record.fields["Proposed Staffing"],
+          });
+        }
+
+        return job;
+      });
+
+      logger.info("Sending jobs response to client", {
+        jobCount: jobs.length,
+        firstJobProposedStaffing: jobs[0]?.proposedStaffing,
+      });
 
       res.json(jobs);
     } catch (error) {
