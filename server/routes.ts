@@ -103,7 +103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // NEW - writes to Airtable via middleware
       const response = await fetch(
-        `${process.env.MIDDLEWARE_URL}/api/Job Intake`,
+        `${process.env.MIDDLEWARE_URL}/api/Job%20Intake`,
         {
           method: "POST",
           headers: {
@@ -195,7 +195,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/jobs", async (req, res) => {
     try {
       const response = await fetch(
-        `${process.env.MIDDLEWARE_URL}/api/Job Intake`,
+        `${process.env.MIDDLEWARE_URL}/api/Job%20Intake`,
         {
           headers: {
             Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
@@ -361,7 +361,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Get job details from Airtable via middleware
       const jobResponse = await fetch(
-        `${process.env.MIDDLEWARE_URL}/api/Job Intake/${jobId}`,
+        `${process.env.MIDDLEWARE_URL}/api/Job%20Intake/${jobId}`,
         {
           headers: {
             Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
@@ -460,7 +460,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Update job in Airtable via middleware
         try {
           const updateResponse = await fetch(
-            `${process.env.MIDDLEWARE_URL}/api/Job Intake/${jobId}`,
+            `${process.env.MIDDLEWARE_URL}/api/Job%20Intake/${jobId}`,
             {
               method: "PATCH",
               headers: {
