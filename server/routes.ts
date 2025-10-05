@@ -194,6 +194,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get recent jobs from Airtable via middleware
   app.get("/api/jobs", async (req, res) => {
     try {
+      // Add cache-control headers to prevent stale data
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
+      
       const response = await fetch(
         `${process.env.MIDDLEWARE_URL}/api/Job%20Intake`,
         {
@@ -223,6 +228,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         jobType: record.fields["Job Type"] || null,
         techsNeeded: record.fields["Techs Needed"] || null,
         bodyPlain: record.fields["Email Body"] || "",
+        proposedStaffing: record.fields["Proposed Staffing"] || null,
+        matchScore: record.fields["Match Score"] || null,
       }));
 
       res.json(jobs);
