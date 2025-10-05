@@ -114,6 +114,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             fields: {
               Name: jobData.subject,
               "Job Type": jobData.jobType,
+              "Client Email": jobData.clientEmail,
+              "Start Date": jobData.scheduledDate,
               Location: jobData.location,
               Time: jobData.scheduledTime,
               "Techs Needed": jobData.techsNeeded,

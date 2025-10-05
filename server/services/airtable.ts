@@ -161,7 +161,7 @@ export class AirtableService {
       for (const tableName of possibleTableNames) {
         try {
           const filterFormula = `{Status} = 'Active'`;
-          const fields = ["Name", "Status", "Technician Certifications"];
+          const fields = ["Name", "Status", "Certificates"];
 
           const response = await this.makeRequest<TechnicianFields>(
             `/${this.baseId}/${encodeURIComponent(tableName)}`,
