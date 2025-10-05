@@ -359,9 +359,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Get job details from Airtable via middleware
-      const jobResponse = await fetch(
-        `${process.env.MIDDLEWARE_URL}/api/Job%20Intake/${jobId}`,
+      // Get all jobs from Airtable via middleware
+      const jobsResponse = await fetch(
+        `${process.env.MIDDLEWARE_URL}/api/Job%20Intake`,
         {
           headers: {
             Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
@@ -369,43 +369,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
       );
 
-      if (!jobResponse.ok) {
-        const errorText = await jobResponse.text();
-        logger.error("Failed to fetch job from middleware", {
-          jobId,
-          status: jobResponse.status,
-          response: errorText.substring(0, 200),
+      if (!jobsResponse.ok) {
+        logger.error("Failed to fetch jobs from middleware", {
+          status: jobsResponse.status,
         });
+        return res.status(502).json({
+          status: "error",
+          message: "Failed to fetch jobs from middleware",
+        });
+      }
+
+      const airtableData = await jobsResponse.json();
+      
+      // Find the specific job by ID
+      const airtableJob = airtableData.records.find((record: any) => record.id === jobId);
+      
+      if (!airtableJob) {
+        logger.error("Job not found in Airtable", { jobId });
         return res.status(404).json({
           status: "error",
           message: "Job not found",
         });
       }
 
-      // Check if response is JSON
-      const contentType = jobResponse.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        const errorText = await jobResponse.text();
-        logger.error("Middleware returned non-JSON response", {
-          jobId,
-          contentType,
-          response: errorText.substring(0, 200),
-        });
-        return res.status(502).json({
-          status: "error",
-          message: "Invalid response from middleware service",
-        });
-      }
-
-      const airtableJob = await jobResponse.json();
-
       // Transform Airtable format to match expected job structure
       const job = {
         id: airtableJob.id,
-        clientEmail: "", // Job Intake doesn't have this field
+        clientEmail: airtableJob.fields.Client || "",
         subject: airtableJob.fields.Name || "",
         location: airtableJob.fields.Location || null,
-        scheduledDate: null, // Job Intake doesn't have Start Date
+        scheduledDate: airtableJob.fields["Start Date"] || null,
         scheduledTime: airtableJob.fields.Time || null,
         jobType: airtableJob.fields["Job Type"] || null,
         techsNeeded: airtableJob.fields["Techs Needed"] || null,
