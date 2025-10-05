@@ -102,22 +102,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       // NEW - writes to Airtable via middleware
-      const response = await fetch(`${process.env.MIDDLEWARE_URL}/api/Jobs`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          fields: {
-            Name: jobData.subject,
-            Client: jobData.clientEmail,
-            Select: "Active",
-            "Start Date": jobData.scheduledDate,
-            // Add any other fields that exist in your Airtable Jobs table
+      const response = await fetch(
+        `${process.env.MIDDLEWARE_URL}/api/Job Intake`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
+            "Content-Type": "application/json",
           },
-        }),
-      });
+          body: JSON.stringify({
+            fields: {
+              Name: jobData.subject,
+              "Job Type": jobData.jobType,
+              Location: jobData.location,
+              Time: jobData.scheduledTime,
+              "Techs Needed": jobData.techsNeeded,
+              "Email Body": jobData.bodyPlain,
+              "AI Analysis": JSON.stringify(
+                emailData.aiAnalysis || parsedJobDetails,
+                null,
+                2,
+              ),
+            },
+          }),
+        },
+      );
 
       if (!response.ok) {
         throw new Error(`Middleware request failed: ${response.status}`);
@@ -183,11 +192,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get recent jobs from Airtable via middleware
   app.get("/api/jobs", async (req, res) => {
     try {
-      const response = await fetch(`${process.env.MIDDLEWARE_URL}/api/Jobs`, {
-        headers: {
-          Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
+      const response = await fetch(
+        `${process.env.MIDDLEWARE_URL}/api/Job Intake`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
+          },
         },
-      });
+      );
 
       if (!response.ok) {
         throw new Error(`Middleware request failed: ${response.status}`);
@@ -204,11 +216,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         scheduledDate: record.fields["Start Date"] || null,
         createdAt: record.createdTime,
         // Add other fields your dashboard needs
-        location: null,
-        scheduledTime: null,
-        jobType: null,
-        techsNeeded: null,
-        bodyPlain: "",
+        location: record.fields.Location || null,
+        scheduledTime: record.fields.Time || null,
+        jobType: record.fields["Job Type"] || null,
+        techsNeeded: record.fields["Techs Needed"] || null,
+        bodyPlain: record.fields["Email Body"] || "",
       }));
 
       res.json(jobs);
@@ -346,11 +358,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get job details from Airtable via middleware
-      const jobResponse = await fetch(`${process.env.MIDDLEWARE_URL}/api/Jobs/${jobId}`, {
-        headers: {
-          'Authorization': `Bearer ${process.env.MIDDLEWARE_KEY}`
-        }
-      });
+      const jobResponse = await fetch(
+        `${process.env.MIDDLEWARE_URL}/api/Job Intake/${jobId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
+          },
+        },
+      );
 
       if (!jobResponse.ok) {
         return res.status(404).json({
@@ -364,15 +379,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Transform Airtable format to match expected job structure
       const job = {
         id: airtableJob.id,
-        clientEmail: airtableJob.fields.Client || '',
-        subject: airtableJob.fields.Name || '',
+        clientEmail: "", // Job Intake doesn't have this field
+        subject: airtableJob.fields.Name || "",
         location: airtableJob.fields.Location || null,
-        scheduledDate: airtableJob.fields['Start Date'] || null,
+        scheduledDate: null, // Job Intake doesn't have Start Date
         scheduledTime: airtableJob.fields.Time || null,
-        jobType: airtableJob.fields['Job Type'] || null,
-        techsNeeded: airtableJob.fields['Techs Needed'] || null,
-        status: airtableJob.fields.Select || 'pending',
-        bodyPlain: airtableJob.fields['Body Plain'] || ''
+        jobType: airtableJob.fields["Job Type"] || null,
+        techsNeeded: airtableJob.fields["Techs Needed"] || null,
+        status: "pending",
+        bodyPlain: airtableJob.fields["Email Body"] || "",
       };
 
       // Use job's scheduled date or current date as fallback
@@ -442,28 +457,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Update job in Airtable via middleware
         try {
-          const updateResponse = await fetch(`${process.env.MIDDLEWARE_URL}/api/Jobs/${jobId}`, {
-            method: 'PATCH',
-            headers: {
-              'Authorization': `Bearer ${process.env.MIDDLEWARE_KEY}`,
-              'Content-Type': 'application/json'
+          const updateResponse = await fetch(
+            `${process.env.MIDDLEWARE_URL}/api/Job Intake/${jobId}`,
+            {
+              method: "PATCH",
+              headers: {
+                Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                fields: {
+                  "Proposed Staffing": proposedStaffingText,
+                  "Match Score": bestMatch.matchScore,
+                },
+              }),
             },
-            body: JSON.stringify({
-              fields: {
-                'Proposed Staffing': proposedStaffingText,
-                'Match Score': bestMatch.matchScore
-              }
-            })
-          });
+          );
 
           if (!updateResponse.ok) {
-            logger.warn('Failed to update job staffing in Airtable', {
+            logger.warn("Failed to update job staffing in Airtable", {
               jobId,
-              status: updateResponse.status
+              status: updateResponse.status,
             });
           }
         } catch (error) {
-          logger.error('Error updating job staffing in Airtable', { error, jobId });
+          logger.error("Error updating job staffing in Airtable", {
+            error,
+            jobId,
+          });
         }
       }
 
