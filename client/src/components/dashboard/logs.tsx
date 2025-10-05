@@ -19,10 +19,10 @@ export function Logs() {
 
   const filteredLogs = logs?.filter((log: any) => {
     const matchesLevel = levelFilter === "all" || log.level?.toLowerCase() === levelFilter.toLowerCase();
-    const matchesSearch = searchTerm === "" || 
+    const matchesSearch = searchTerm === "" ||
       log.message?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       log.endpoint?.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     return matchesLevel && matchesSearch;
   }) || [];
 
@@ -91,17 +91,17 @@ export function Logs() {
             Request Logs
           </CardTitle>
           <div className="flex items-center space-x-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => refetch()}
               data-testid="button-refresh-logs"
             >
               <RefreshCw className="mr-1 h-4 w-4" />
               Refresh
             </Button>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               size="sm"
               onClick={handleExport}
               disabled={!filteredLogs || filteredLogs.length === 0}
@@ -128,7 +128,7 @@ export function Logs() {
               <SelectItem value="debug">DEBUG</SelectItem>
             </SelectContent>
           </Select>
-          
+
           <Select value={timeFilter} onValueChange={setTimeFilter}>
             <SelectTrigger className="w-40" data-testid="select-time-filter">
               <SelectValue placeholder="Last Hour" />
@@ -140,7 +140,7 @@ export function Logs() {
               <SelectItem value="custom">Custom Range</SelectItem>
             </SelectContent>
           </Select>
-          
+
           <Input
             type="text"
             placeholder="Search logs..."
@@ -150,12 +150,12 @@ export function Logs() {
             data-testid="input-search-logs"
           />
         </div>
-        
+
         {/* Log Entries */}
         <div className="space-y-2 max-h-96 overflow-y-auto">
           {filteredLogs.length > 0 ? (
             filteredLogs.map((log: any, index: number) => (
-              <div 
+              <div
                 key={index}
                 className="flex items-start space-x-4 py-2 border-b border-border/50 last:border-b-0"
                 data-testid={`log-entry-${index}`}
@@ -172,7 +172,7 @@ export function Logs() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-foreground font-mono">
-                    {log.method && log.endpoint ? 
+                    {log.method && log.endpoint ?
                       `${log.method} ${log.endpoint} - ${log.statusCode} - ${log.responseTime}ms` :
                       log.message
                     }

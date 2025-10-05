@@ -18,11 +18,14 @@ export interface AirtableError {
   message: string;
 }
 
-// Technician data interfaces
+// Technician data interfaces (from Personell table)
 export interface TechnicianFields {
   Name: string;
   Status: "Active" | "Inactive";
-  "Technician Certifications": string[];
+  Certificates: string[]; // Linked records to Certificates table
+  Role?: string[]; // Multiple select field
+  Email?: string;
+  Phone?: string;
 }
 
 export interface AvailabilityFields {
@@ -144,63 +147,29 @@ export class AirtableService {
    */
   async getActiveTechnicians(): Promise<AirtableRecord<TechnicianFields>[]> {
     try {
-      // Try multiple common table names for technicians
-      const possibleTableNames = [
-        "Personell",
-        "Technicians",
-        "Employees",
-        "Staff",
-        "Workers",
-        "Team Members",
-      ];
-      const tableNameEnv = process.env.AIRTABLE_TECHNICIANS_TABLE;
+      // Use "Personell" as the primary table name based on schema
+      const tableName = "Personell";
+      const filterFormula = `{Status} = 'Active'`;
+      const fields = ["Name", "Status", "Certificates", "Role", "Email", "Phone"];
 
-      if (tableNameEnv) {
-        possibleTableNames.unshift(tableNameEnv);
-      }
-
-      for (const tableName of possibleTableNames) {
-        try {
-          const filterFormula = `{Status} = 'Active'`;
-          const fields = ["Name", "Status", "Certificates"];
-
-          const response = await this.makeRequest<TechnicianFields>(
-            `/${this.baseId}/${encodeURIComponent(tableName)}`,
-            {
-              filterByFormula: filterFormula,
-              fields: fields,
-            },
-          );
-
-          logger.info(
-            `Retrieved active technicians from Airtable table: ${tableName}`,
-            {
-              count: response.records.length,
-            },
-          );
-
-          return response.records;
-        } catch (tableError) {
-          logger.debug(
-            `Table '${tableName}' not found or accessible, trying next...`,
-            {
-              error:
-                tableError instanceof Error
-                  ? tableError.message
-                  : "Unknown error",
-            },
-          );
-          continue;
-        }
-      }
-
-      // If no tables work, log a warning and return empty array instead of throwing
-      logger.warn(
-        `No accessible technician table found. Tried: ${possibleTableNames.join(", ")}. Please ensure you have a table with technician data and proper field names.`,
+      const response = await this.makeRequest<TechnicianFields>(
+        `/${this.baseId}/${encodeURIComponent(tableName)}`,
+        {
+          filterByFormula: filterFormula,
+          fields: fields,
+        },
       );
-      return [];
+
+      logger.info(
+        `Retrieved active technicians from Airtable table: ${tableName}`,
+        {
+          count: response.records.length,
+        },
+      );
+
+      return response.records;
     } catch (error) {
-      logger.error("Failed to get active technicians", { error });
+      logger.error("Failed to get active technicians from Personell table", { error });
       // Return empty array instead of throwing to maintain system resilience
       logger.warn("Returning empty technicians list due to error");
       return [];
@@ -418,8 +387,8 @@ export class AirtableService {
     // Enhanced logic-based scoring with certification matching
     let score = 35; // Lower base score to differentiate from AI results
 
-    // Certification matching
-    const certifications = technician["Technician Certifications"] || [];
+    // Certification matching - Certificates is now a linked record field
+    const certifications = technician.Certificates || [];
     const jobTypeLower = jobType.toLowerCase();
 
     // Exact certification matches with level considerations
