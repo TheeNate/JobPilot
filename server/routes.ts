@@ -370,9 +370,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       if (!jobResponse.ok) {
+        const errorText = await jobResponse.text();
+        logger.error("Failed to fetch job from middleware", {
+          jobId,
+          status: jobResponse.status,
+          response: errorText.substring(0, 200),
+        });
         return res.status(404).json({
           status: "error",
           message: "Job not found",
+        });
+      }
+
+      // Check if response is JSON
+      const contentType = jobResponse.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const errorText = await jobResponse.text();
+        logger.error("Middleware returned non-JSON response", {
+          jobId,
+          contentType,
+          response: errorText.substring(0, 200),
+        });
+        return res.status(502).json({
+          status: "error",
+          message: "Invalid response from middleware service",
         });
       }
 
