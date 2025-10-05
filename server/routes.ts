@@ -91,10 +91,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         techsNeeded: parsedJobDetails.techsNeeded || null,
         status: "pending" as const,
       };
-      
-      const job = await storage.createJob(jobData);
-      
-      // Log the request to database
+
+      // NEW - writes to Airtable via middleware
+      const response = await fetch(`${process.env.MIDDLEWARE_URL}/api/Jobs`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.MIDDLEWARE_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fields: {
+            Name: jobData.subject,
+            Client: jobData.clientEmail,
+            Select: 'Active',
+            "Start Date": jobData.scheduledDate,
+            // Add any other fields that exist in your Airtable Jobs table
+          }
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Middleware request failed: ${response.status}`);
+      }
+
+      const job = await response.json();
+
+      // Log the request to database (keeping PostgreSQL logging for now)
       const responseTime = Date.now() - startTime;
       await storage.createRequestLog({
         method: "POST",
