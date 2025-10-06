@@ -22,7 +22,8 @@ export interface AirtableError {
 export interface TechnicianFields {
   Name: string;
   Status: "Active" | "Inactive";
-  "Technician Certifications": string[];
+  Certifications: string[];
+  "Availability Periods"?: string[]; // Linked records to Availability Periods table
 }
 
 export interface AvailabilityFields {
@@ -163,7 +164,7 @@ export class AirtableService {
           const fields = [
             "Name",
             "Status",
-            "Technician Certifications",
+            "Certifications", // Updated to match schema
           ];
 
           const response = await this.makeRequest<TechnicianFields>(
@@ -243,7 +244,7 @@ export class AirtableService {
 
       const fields = [
         "Technician",
-        "Period Type", 
+        "Period Type",
         "Start Date",
         "End Date",
         "Reason",
@@ -421,7 +422,7 @@ export class AirtableService {
     let score = 35; // Lower base score to differentiate from AI results
 
     // Certification matching
-    const certifications = technician["Technician Certifications"] || [];
+    const certifications = technician.Certifications || []; // Updated to use "Certifications"
     const jobTypeLower = jobType.toLowerCase();
 
     // Exact certification matches with level considerations
@@ -432,7 +433,7 @@ export class AirtableService {
         score += 25; // Good match for UT Level I or general UT
       }
     }
-    
+
     if (jobTypeLower.includes("rt") || jobTypeLower.includes("radiograph")) {
       if (certifications.some(c => c.toLowerCase().includes("rt level ii") || c.toLowerCase().includes("rt-2"))) {
         score += 35; // Excellent match for RT Level II
@@ -440,19 +441,19 @@ export class AirtableService {
         score += 25; // Good match for RT Level I or general RT
       }
     }
-    
+
     if (jobTypeLower.includes("mt") || jobTypeLower.includes("magnetic")) {
       if (certifications.some(c => c.toLowerCase().includes("mt"))) {
         score += 30; // Strong match for MT jobs
       }
     }
-    
+
     if (jobTypeLower.includes("pt") || jobTypeLower.includes("penetrant")) {
       if (certifications.some(c => c.toLowerCase().includes("pt"))) {
         score += 30; // Strong match for PT jobs
       }
     }
-    
+
     if (jobTypeLower.includes("vt") || jobTypeLower.includes("visual")) {
       if (certifications.some(c => c.toLowerCase().includes("vt"))) {
         score += 25; // Good match for VT jobs
@@ -461,7 +462,7 @@ export class AirtableService {
 
     // General NDT experience indicators
     const ndt_keywords = ["ndt", "non-destructive", "testing", "inspection", "asnt"];
-    if (ndt_keywords.some(keyword => 
+    if (ndt_keywords.some(keyword =>
       certifications.some(c => c.toLowerCase().includes(keyword))
     )) {
       score += 10; // General NDT experience bonus
@@ -478,7 +479,7 @@ export class AirtableService {
 
     // Safety certifications (critical for industrial work)
     const safety_keywords = ["rope", "access", "confined", "space", "safety", "osha", "cswip", "nace"];
-    if (safety_keywords.some(keyword => 
+    if (safety_keywords.some(keyword =>
       certifications.some(c => c.toLowerCase().includes(keyword))
     )) {
       score += 12; // Safety certification bonus
@@ -486,12 +487,12 @@ export class AirtableService {
 
     // Industry-specific certifications
     const industry_keywords = ["aws", "asme", "api", "pipeline", "offshore", "subsea"];
-    if (industry_keywords.some(keyword => 
+    if (industry_keywords.some(keyword =>
       certifications.some(c => c.toLowerCase().includes(keyword))
     )) {
       score += 8; // Industry specialization bonus
     }
-    
+
     return Math.min(score, 100); // Cap at 100%
   }
 
@@ -503,7 +504,7 @@ export class AirtableService {
     params: Record<string, any> = {},
   ): Promise<AirtableResponse<T>> {
     const requestStartTime = Date.now();
-    
+
     // 1. LOG RATE LIMITER STATE HERE
     logger.debug("🕒 Rate limiter state before request", {
       currentRequests: this.rateLimiter.requests,
@@ -511,7 +512,7 @@ export class AirtableService {
       windowMs: this.rateLimiter.windowMs,
       resetTime: this.rateLimiter.resetTime,
     });
-    
+
     await this.enforceRateLimit();
 
     // 2. LOG URL CONSTRUCTION HERE
@@ -602,7 +603,7 @@ export class AirtableService {
       // 6. LOG DETAILED ERROR INFO HERE (especially for 422)
       let errorDetails;
       let errorText = "Could not parse error response";
-      
+
       try {
         errorDetails = await response.json();
         errorText = errorDetails.error?.message || errorDetails.message || JSON.stringify(errorDetails);

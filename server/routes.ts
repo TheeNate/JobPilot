@@ -238,7 +238,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           technician: {
             id: result.technician.id,
             name: result.technician.fields.Name,
-            certifications: [],
+            certifications: result.technician.fields.Certifications || [],
             status: result.technician.fields.Status
           },
           matchScore: result.matchScore,
