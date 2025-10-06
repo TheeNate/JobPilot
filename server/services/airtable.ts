@@ -18,14 +18,11 @@ export interface AirtableError {
   message: string;
 }
 
-// Technician data interfaces (from Personell table)
+// Technician data interfaces
 export interface TechnicianFields {
   Name: string;
   Status: "Active" | "Inactive";
-  Certificates: string[]; // Linked records to Certificates table
-  Role?: string[]; // Multiple select field
-  Email?: string;
-  Phone?: string;
+  "Technician Certifications": string[];
 }
 
 export interface AvailabilityFields {
@@ -147,29 +144,66 @@ export class AirtableService {
    */
   async getActiveTechnicians(): Promise<AirtableRecord<TechnicianFields>[]> {
     try {
-      // Use "Personell" as the primary table name based on schema
-      const tableName = "Personell";
-      const filterFormula = `{Status} = 'Active'`;
-      const fields = ["Name", "Status", "Certificates", "Role", "Email", "Phone"];
+      // Try multiple common table names for technicians
+      const possibleTableNames = [
+        "Technicians",
+        "Employees",
+        "Staff",
+        "Workers",
+        "Team Members",
+      ];
+      const tableNameEnv = process.env.AIRTABLE_TECHNICIANS_TABLE;
 
-      const response = await this.makeRequest<TechnicianFields>(
-        `/${this.baseId}/${encodeURIComponent(tableName)}`,
-        {
-          filterByFormula: filterFormula,
-          fields: fields,
-        },
+      if (tableNameEnv) {
+        possibleTableNames.unshift(tableNameEnv);
+      }
+
+      for (const tableName of possibleTableNames) {
+        try {
+          const filterFormula = `{Status} = 'Active'`;
+          const fields = [
+            "Name",
+            "Status",
+            "Technician Certifications",
+          ];
+
+          const response = await this.makeRequest<TechnicianFields>(
+            `/${this.baseId}/${encodeURIComponent(tableName)}`,
+            {
+              filterByFormula: filterFormula,
+              fields: fields,
+            },
+          );
+
+          logger.info(
+            `Retrieved active technicians from Airtable table: ${tableName}`,
+            {
+              count: response.records.length,
+            },
+          );
+
+          return response.records;
+        } catch (tableError) {
+          logger.debug(
+            `Table '${tableName}' not found or accessible, trying next...`,
+            {
+              error:
+                tableError instanceof Error
+                  ? tableError.message
+                  : "Unknown error",
+            },
+          );
+          continue;
+        }
+      }
+
+      // If no tables work, log a warning and return empty array instead of throwing
+      logger.warn(
+        `No accessible technician table found. Tried: ${possibleTableNames.join(", ")}. Please ensure you have a table with technician data and proper field names.`,
       );
-
-      logger.info(
-        `Retrieved active technicians from Airtable table: ${tableName}`,
-        {
-          count: response.records.length,
-        },
-      );
-
-      return response.records;
+      return [];
     } catch (error) {
-      logger.error("Failed to get active technicians from Personell table", { error });
+      logger.error("Failed to get active technicians", { error });
       // Return empty array instead of throwing to maintain system resilience
       logger.warn("Returning empty technicians list due to error");
       return [];
@@ -210,7 +244,7 @@ export class AirtableService {
 
       const fields = [
         "Technician",
-        "Period Type",
+        "Period Type", 
         "Start Date",
         "End Date",
         "Reason",
@@ -387,84 +421,50 @@ export class AirtableService {
     // Enhanced logic-based scoring with certification matching
     let score = 35; // Lower base score to differentiate from AI results
 
-    // Certification matching - Certificates is now a linked record field
-    const certifications = technician.Certificates || [];
+    // Certification matching
+    const certifications = technician["Technician Certifications"] || [];
     const jobTypeLower = jobType.toLowerCase();
 
     // Exact certification matches with level considerations
     if (jobTypeLower.includes("ut") || jobTypeLower.includes("ultrasonic")) {
-      if (
-        certifications.some(
-          (c) =>
-            c.toLowerCase().includes("ut level ii") ||
-            c.toLowerCase().includes("ut-2"),
-        )
-      ) {
+      if (certifications.some(c => c.toLowerCase().includes("ut level ii") || c.toLowerCase().includes("ut-2"))) {
         score += 35; // Excellent match for UT Level II
-      } else if (
-        certifications.some(
-          (c) =>
-            c.toLowerCase().includes("ut level i") ||
-            c.toLowerCase().includes("ut-1") ||
-            c.toLowerCase().includes("ut"),
-        )
-      ) {
+      } else if (certifications.some(c => c.toLowerCase().includes("ut level i") || c.toLowerCase().includes("ut-1") || c.toLowerCase().includes("ut"))) {
         score += 25; // Good match for UT Level I or general UT
       }
     }
-
+    
     if (jobTypeLower.includes("rt") || jobTypeLower.includes("radiograph")) {
-      if (
-        certifications.some(
-          (c) =>
-            c.toLowerCase().includes("rt level ii") ||
-            c.toLowerCase().includes("rt-2"),
-        )
-      ) {
+      if (certifications.some(c => c.toLowerCase().includes("rt level ii") || c.toLowerCase().includes("rt-2"))) {
         score += 35; // Excellent match for RT Level II
-      } else if (
-        certifications.some(
-          (c) =>
-            c.toLowerCase().includes("rt level i") ||
-            c.toLowerCase().includes("rt-1") ||
-            c.toLowerCase().includes("rt"),
-        )
-      ) {
+      } else if (certifications.some(c => c.toLowerCase().includes("rt level i") || c.toLowerCase().includes("rt-1") || c.toLowerCase().includes("rt"))) {
         score += 25; // Good match for RT Level I or general RT
       }
     }
-
+    
     if (jobTypeLower.includes("mt") || jobTypeLower.includes("magnetic")) {
-      if (certifications.some((c) => c.toLowerCase().includes("mt"))) {
+      if (certifications.some(c => c.toLowerCase().includes("mt"))) {
         score += 30; // Strong match for MT jobs
       }
     }
-
+    
     if (jobTypeLower.includes("pt") || jobTypeLower.includes("penetrant")) {
-      if (certifications.some((c) => c.toLowerCase().includes("pt"))) {
+      if (certifications.some(c => c.toLowerCase().includes("pt"))) {
         score += 30; // Strong match for PT jobs
       }
     }
-
+    
     if (jobTypeLower.includes("vt") || jobTypeLower.includes("visual")) {
-      if (certifications.some((c) => c.toLowerCase().includes("vt"))) {
+      if (certifications.some(c => c.toLowerCase().includes("vt"))) {
         score += 25; // Good match for VT jobs
       }
     }
 
     // General NDT experience indicators
-    const ndt_keywords = [
-      "ndt",
-      "non-destructive",
-      "testing",
-      "inspection",
-      "asnt",
-    ];
-    if (
-      ndt_keywords.some((keyword) =>
-        certifications.some((c) => c.toLowerCase().includes(keyword)),
-      )
-    ) {
+    const ndt_keywords = ["ndt", "non-destructive", "testing", "inspection", "asnt"];
+    if (ndt_keywords.some(keyword => 
+      certifications.some(c => c.toLowerCase().includes(keyword))
+    )) {
       score += 10; // General NDT experience bonus
     }
 
@@ -478,41 +478,21 @@ export class AirtableService {
     }
 
     // Safety certifications (critical for industrial work)
-    const safety_keywords = [
-      "rope",
-      "access",
-      "confined",
-      "space",
-      "safety",
-      "osha",
-      "cswip",
-      "nace",
-    ];
-    if (
-      safety_keywords.some((keyword) =>
-        certifications.some((c) => c.toLowerCase().includes(keyword)),
-      )
-    ) {
+    const safety_keywords = ["rope", "access", "confined", "space", "safety", "osha", "cswip", "nace"];
+    if (safety_keywords.some(keyword => 
+      certifications.some(c => c.toLowerCase().includes(keyword))
+    )) {
       score += 12; // Safety certification bonus
     }
 
     // Industry-specific certifications
-    const industry_keywords = [
-      "aws",
-      "asme",
-      "api",
-      "pipeline",
-      "offshore",
-      "subsea",
-    ];
-    if (
-      industry_keywords.some((keyword) =>
-        certifications.some((c) => c.toLowerCase().includes(keyword)),
-      )
-    ) {
+    const industry_keywords = ["aws", "asme", "api", "pipeline", "offshore", "subsea"];
+    if (industry_keywords.some(keyword => 
+      certifications.some(c => c.toLowerCase().includes(keyword))
+    )) {
       score += 8; // Industry specialization bonus
     }
-
+    
     return Math.min(score, 100); // Cap at 100%
   }
 
@@ -524,7 +504,7 @@ export class AirtableService {
     params: Record<string, any> = {},
   ): Promise<AirtableResponse<T>> {
     const requestStartTime = Date.now();
-
+    
     // 1. LOG RATE LIMITER STATE HERE
     logger.debug("🕒 Rate limiter state before request", {
       currentRequests: this.rateLimiter.requests,
@@ -532,7 +512,7 @@ export class AirtableService {
       windowMs: this.rateLimiter.windowMs,
       resetTime: this.rateLimiter.resetTime,
     });
-
+    
     await this.enforceRateLimit();
 
     // 2. LOG URL CONSTRUCTION HERE
@@ -562,10 +542,8 @@ export class AirtableService {
       originalParams: params,
       filterFormula: {
         original: params.filterByFormula,
-        encoded: params.filterByFormula
-          ? encodeURIComponent(params.filterByFormula)
-          : undefined,
-        urlEncoded: url.searchParams.get("filterByFormula"),
+        encoded: params.filterByFormula ? encodeURIComponent(params.filterByFormula) : undefined,
+        urlEncoded: url.searchParams.get('filterByFormula'),
       },
       headers: {
         Authorization: `Bearer ${this.apiKey?.substring(0, 10)}...`,
@@ -583,7 +561,7 @@ export class AirtableService {
           app: params.filterByFormula,
           curl: `{Status} = 'Active'`,
           encoded: encodeURIComponent(params.filterByFormula),
-        },
+        }
       });
     }
 
@@ -612,7 +590,7 @@ export class AirtableService {
       // 5. LOG RATE LIMIT DETAILS HERE
       logger.warn("⚠️ Airtable rate limit exceeded", {
         status: response.status,
-        retryAfter: response.headers.get("Retry-After"),
+        retryAfter: response.headers.get('Retry-After'),
         currentRequests: this.rateLimiter.requests,
         waitTime: "30 seconds",
         url: url.toString(),
@@ -625,13 +603,10 @@ export class AirtableService {
       // 6. LOG DETAILED ERROR INFO HERE (especially for 422)
       let errorDetails;
       let errorText = "Could not parse error response";
-
+      
       try {
         errorDetails = await response.json();
-        errorText =
-          errorDetails.error?.message ||
-          errorDetails.message ||
-          JSON.stringify(errorDetails);
+        errorText = errorDetails.error?.message || errorDetails.message || JSON.stringify(errorDetails);
       } catch (parseError) {
         try {
           errorText = await response.text();
@@ -655,11 +630,10 @@ export class AirtableService {
       // Special debugging for 422 errors
       if (response.status === 422) {
         logger.error("🔍 422 Error Analysis", {
-          likelyIssue:
-            "Unprocessable Entity - Parameter or filter syntax error",
+          likelyIssue: "Unprocessable Entity - Parameter or filter syntax error",
           filterFormula: {
             sent: params.filterByFormula,
-            encoded: url.searchParams.get("filterByFormula"),
+            encoded: url.searchParams.get('filterByFormula'),
             expected: `{Status} = 'Active'`,
           },
           urlComparison: {
@@ -676,7 +650,9 @@ export class AirtableService {
         });
       }
 
-      throw new Error(`Airtable API error ${response.status}: ${errorText}`);
+      throw new Error(
+        `Airtable API error ${response.status}: ${errorText}`,
+      );
     }
 
     const data = await response.json();
@@ -687,12 +663,10 @@ export class AirtableService {
       status: response.status,
       recordCount: data.records?.length || 0,
       responseTime: `${responseTime}ms`,
-      firstRecord: data.records?.[0]
-        ? {
-            id: data.records[0].id,
-            fields: Object.keys(data.records[0].fields || {}),
-          }
-        : null,
+      firstRecord: data.records?.[0] ? {
+        id: data.records[0].id,
+        fields: Object.keys(data.records[0].fields || {}),
+      } : null,
       rateLimiterState: {
         requests: this.rateLimiter.requests,
         maxRequests: this.rateLimiter.maxRequests,

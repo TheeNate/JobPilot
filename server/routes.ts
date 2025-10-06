@@ -1,12 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import {
-  insertJobSchema,
-  insertRequestLogSchema,
-  jobs,
-  jobAssignments,
-} from "@shared/schema";
+import { insertJobSchema, insertRequestLogSchema, jobs, jobAssignments } from "@shared/schema";
 import { logger } from "./services/logger";
 import { EmailParser } from "./services/parser";
 import { airtableService } from "./services/airtable";
@@ -21,15 +16,13 @@ const emailPayloadSchema = z.object({
   from: z.string().email(),
   to: z.string().email(),
   "body-plain": z.string(),
-  aiExtracted: z
-    .object({
-      location: z.string().nullable().optional(),
-      scheduledDate: z.string().nullable().optional(),
-      scheduledTime: z.string().nullable().optional(),
-      jobType: z.string().nullable().optional(),
-      techsNeeded: z.number().nullable().optional(),
-    })
-    .optional(),
+  aiExtracted: z.object({
+    location: z.string().nullable().optional(),
+    scheduledDate: z.string().nullable().optional(),
+    scheduledTime: z.string().nullable().optional(),
+    jobType: z.string().nullable().optional(),
+    techsNeeded: z.number().nullable().optional()
+  }).optional()
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -38,16 +31,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       // Check database connection
       const dbStatus = await storage.checkConnection();
-
+      
       // Check Airtable connection
       const airtableStatus = await airtableService.checkHealth();
-
-      const overallStatus =
-        dbStatus && airtableStatus.status === "healthy"
-          ? "healthy"
-          : "unhealthy";
+      
+      const overallStatus = dbStatus && airtableStatus.status === "healthy" ? "healthy" : "unhealthy";
       const statusCode = overallStatus === "healthy" ? 200 : 503;
-
+      
       res.status(statusCode).json({
         status: overallStatus,
         timestamp: new Date().toISOString(),
@@ -56,7 +46,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           status: airtableStatus.status,
           message: airtableStatus.message,
           quotaUsed: airtableStatus.quotaUsed,
-          lastConnection: airtableStatus.lastConnection,
+          lastConnection: airtableStatus.lastConnection
         },
         uptime: process.uptime(),
       });
@@ -72,22 +62,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Job intake endpoint
   app.post("/api/job-intake", async (req, res) => {
     const startTime = Date.now();
-
+    
     try {
       // Validate email payload
       const emailData = emailPayloadSchema.parse(req.body);
-
+      
       // Log the incoming request
       logger.info("Job intake request received", {
         from: emailData.from,
         subject: emailData.subject,
       });
-
+      
       // Use AI-extracted data if available, otherwise parse
-      const parsedJobDetails =
-        emailData.aiExtracted ||
-        EmailParser.parseJobDetails(emailData["body-plain"], emailData.subject);
-
+      const parsedJobDetails = emailData.aiExtracted || EmailParser.parseJobDetails(
+        emailData["body-plain"], 
+        emailData.subject
+      );
+      
       // Create job record with parsed data
       const jobData = {
         clientEmail: emailData.from,
@@ -100,43 +91,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         techsNeeded: parsedJobDetails.techsNeeded || null,
         status: "pending" as const,
       };
-
-      // NEW - writes to Airtable via middleware
-      const response = await fetch(
-        `${process.env.MIDDLEWARE_URL}/api/Job%20Intake`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            fields: {
-              Name: jobData.subject,
-              "Job Type": jobData.jobType,
-              "Client Email": jobData.clientEmail,
-              "Start Date": jobData.scheduledDate,
-              Location: jobData.location,
-              Time: jobData.scheduledTime,
-              "Techs Needed": jobData.techsNeeded,
-              "Email Body": jobData.bodyPlain,
-              "AI Analysis": JSON.stringify(
-                emailData.aiAnalysis || parsedJobDetails,
-                null,
-                2,
-              ),
-            },
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(`Middleware request failed: ${response.status}`);
-      }
-
-      const job = await response.json();
-
-      // Log the request to database (keeping PostgreSQL logging for now)
+      
+      const job = await storage.createJob(jobData);
+      
+      // Log the request to database
       const responseTime = Date.now() - startTime;
       await storage.createRequestLog({
         method: "POST",
@@ -145,23 +103,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responseTime,
         requestBody: JSON.stringify(req.body),
       });
-
+      
       logger.info("Job intake processed successfully", {
         jobId: job.id,
         responseTime,
       });
-
+      
       res.json({
         status: "success",
         message: "Job intake request logged successfully",
         requestId: job.id,
         timestamp: new Date().toISOString(),
       });
+      
     } catch (error) {
       const responseTime = Date.now() - startTime;
       const isValidationError = error instanceof z.ZodError;
       const statusCode = isValidationError ? 400 : 500;
-
+      
       // Log error request with correct status code
       await storage.createRequestLog({
         method: "POST",
@@ -170,12 +129,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responseTime,
         requestBody: JSON.stringify(req.body),
       });
-
+      
       logger.error("Job intake request failed", {
         error: error instanceof Error ? error.message : "Unknown error",
         responseTime,
       });
-
+      
       if (isValidationError) {
         res.status(400).json({
           status: "error",
@@ -191,78 +150,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get recent jobs from Airtable via middleware
+  // Get recent jobs
   app.get("/api/jobs", async (req, res) => {
     try {
-      // Add cache-control headers to prevent stale data
-      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-      res.set('Pragma', 'no-cache');
-      res.set('Expires', '0');
-      
-      const response = await fetch(
-        `${process.env.MIDDLEWARE_URL}/api/Job%20Intake`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
-          },
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(`Middleware request failed: ${response.status}`);
-      }
-
-      const airtableData = await response.json();
-
-      // LOG THE RAW AIRTABLE RESPONSE
-      logger.info("Raw Airtable response structure", {
-        recordCount: airtableData.records?.length,
-        firstRecordId: airtableData.records?.[0]?.id,
-        firstRecordFields: airtableData.records?.[0]?.fields,
-        allFieldNames: airtableData.records?.[0] ? Object.keys(airtableData.records[0].fields) : [],
-      });
-
-      // Transform Airtable format to match what dashboard expects
-      const jobs = airtableData.records.map((record: any) => {
-        const job = {
-        id: record.id,
-        clientEmail: record.fields["Client Email"] || "",
-        subject: record.fields.Name || "",
-        status: record.fields.Select || "pending",
-        scheduledDate: record.fields["Start Date"] || null,
-        createdAt: record.createdTime,
-        // Add other fields your dashboard needs
-        location: record.fields.Location || null,
-        scheduledTime: record.fields.Time || null,
-        jobType: record.fields["Job Type"] || null,
-        techsNeeded: record.fields["Techs Needed"] || null,
-        bodyPlain: record.fields["Email Body"] || "",
-        proposedStaffing: record.fields["Proposed Staffing"] || null,
-        matchScore: record.fields["Match Score"] || null,
-      };
-
-        // LOG EACH TRANSFORMED JOB
-        if (record.id === airtableData.records[0].id) {
-          logger.info("First transformed job data", {
-            jobId: job.id,
-            proposedStaffing: job.proposedStaffing,
-            matchScore: job.matchScore,
-            hasProposedStaffing: !!job.proposedStaffing,
-            rawProposedStaffing: record.fields["Proposed Staffing"],
-          });
-        }
-
-        return job;
-      });
-
-      logger.info("Sending jobs response to client", {
-        jobCount: jobs.length,
-        firstJobProposedStaffing: jobs[0]?.proposedStaffing,
-      });
-
+      const jobs = await storage.getRecentJobs();
       res.json(jobs);
     } catch (error) {
-      logger.error("Failed to fetch jobs from Airtable", { error });
+      logger.error("Failed to fetch jobs", { error });
       res.status(500).json({
         status: "error",
         message: "Failed to fetch jobs",
@@ -301,24 +195,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get available technicians for a specific date and job type
   app.get("/api/technicians/available", async (req, res) => {
     const startTime = Date.now();
-
+    
     try {
       const { date, jobType, limit } = req.query;
-
+      
       if (!date || typeof date !== "string") {
         return res.status(400).json({
           status: "error",
-          message: "Date parameter is required (format: YYYY-MM-DD)",
+          message: "Date parameter is required (format: YYYY-MM-DD)"
         });
       }
-
+      
       const maxLimit = limit ? Math.min(parseInt(limit as string), 50) : 10;
-
-      const availableTechnicians =
-        await airtableService.findAvailableTechnicians(date, jobType as string);
-
+      
+      const availableTechnicians = await airtableService.findAvailableTechnicians(
+        date, 
+        jobType as string
+      );
+      
       const limitedResults = availableTechnicians.slice(0, maxLimit);
-
+      
       // Log the request
       const responseTime = Date.now() - startTime;
       await storage.createRequestLog({
@@ -328,38 +224,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responseTime,
         requestBody: null,
       });
-
+      
       logger.info("Retrieved available technicians", {
         date,
         jobType,
         count: limitedResults.length,
-        responseTime,
+        responseTime
       });
-
+      
       res.json({
         status: "success",
-        data: limitedResults.map((result) => ({
+        data: limitedResults.map(result => ({
           technician: {
             id: result.technician.id,
             name: result.technician.fields.Name,
             certifications: [],
-            status: result.technician.fields.Status,
+            status: result.technician.fields.Status
           },
           matchScore: result.matchScore,
-          availability: result.availability.map((avail) => ({
+          availability: result.availability.map(avail => ({
             periodType: avail.fields["Period Type"],
             startDate: avail.fields["Start Date"],
             endDate: avail.fields["End Date"],
-            reason: avail.fields.Reason,
-          })),
+            reason: avail.fields.Reason
+          }))
         })),
         metadata: {
           requestDate: date,
           jobType,
           totalCount: availableTechnicians.length,
-          limitApplied: maxLimit,
-        },
+          limitApplied: maxLimit
+        }
       });
+      
     } catch (error) {
       const responseTime = Date.now() - startTime;
       await storage.createRequestLog({
@@ -369,12 +266,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responseTime,
         requestBody: null,
       });
-
+      
       logger.error("Failed to get available technicians", { error });
       res.status(500).json({
         status: "error",
         message: "Failed to retrieve available technicians",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: error instanceof Error ? error.message : "Unknown error"
       });
     }
   });
@@ -382,75 +279,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Match technicians for a specific job
   app.post("/api/jobs/:jobId/match-technicians", async (req, res) => {
     const startTime = Date.now();
-
+    
     try {
       const { jobId } = req.params;
       const { requirementOverrides, forceRefresh } = req.body || {};
-
+      
       if (!jobId) {
         return res.status(400).json({
           status: "error",
-          message: "Job ID is required",
+          message: "Job ID is required"
         });
       }
-
-      // Get all jobs from Airtable via middleware
-      const jobsResponse = await fetch(
-        `${process.env.MIDDLEWARE_URL}/api/Job%20Intake`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
-          },
-        },
-      );
-
-      if (!jobsResponse.ok) {
-        logger.error("Failed to fetch jobs from middleware", {
-          status: jobsResponse.status,
-        });
-        return res.status(502).json({
-          status: "error",
-          message: "Failed to fetch jobs from middleware",
-        });
-      }
-
-      const airtableData = await jobsResponse.json();
       
-      // Find the specific job by ID
-      const airtableJob = airtableData.records.find((record: any) => record.id === jobId);
-      
-      if (!airtableJob) {
-        logger.error("Job not found in Airtable", { jobId });
+      // Get job details from database
+      const job = await storage.getJobById(jobId);
+      if (!job) {
         return res.status(404).json({
           status: "error",
-          message: "Job not found",
+          message: "Job not found"
         });
       }
-
-      // Transform Airtable format to match expected job structure
-      const job = {
-        id: airtableJob.id,
-        clientEmail: airtableJob.fields["Client Email"] || "",
-        subject: airtableJob.fields.Name || "",
-        location: airtableJob.fields.Location || null,
-        scheduledDate: airtableJob.fields["Start Date"] || null,
-        scheduledTime: airtableJob.fields.Time || null,
-        jobType: airtableJob.fields["Job Type"] || null,
-        techsNeeded: airtableJob.fields["Techs Needed"] || null,
-        status: "pending",
-        bodyPlain: airtableJob.fields["Email Body"] || "",
-      };
-
+      
       // Use job's scheduled date or current date as fallback
-      const jobDate =
-        job.scheduledDate || new Date().toISOString().split("T")[0];
-
+      const jobDate = job.scheduledDate || new Date().toISOString().split('T')[0];
+      
       // Use requirement overrides if provided, otherwise use job details
       const jobType = requirementOverrides?.jobType || job.jobType;
-
+      
       // Get available technicians first
-      const availableTechnicians =
-        await airtableService.findAvailableTechnicians(jobDate, jobType);
+      const availableTechnicians = await airtableService.findAvailableTechnicians(
+        jobDate,
+        jobType
+      );
 
       // Try Claude AI analysis for intelligent matching
       let aiAnalysis = null;
@@ -463,26 +323,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
             jobType: jobType || "",
             subject: job.subject || "",
             bodyPlain: job.bodyPlain || "",
-            techsNeeded: job.techsNeeded?.toString() || null,
+            techsNeeded: job.techsNeeded?.toString() || null
           };
 
-          aiAnalysis = await claudeMatchingService.generateMatchAnalysis(
-            jobDetails,
-            availableTechnicians,
-          );
-
+          aiAnalysis = await claudeMatchingService.generateMatchAnalysis(jobDetails, availableTechnicians);
+          
           logger.info("AI analysis completed", {
             jobId,
             topRecommendation: aiAnalysis.topRecommendation.technician.name,
             confidenceScore: aiAnalysis.topRecommendation.confidenceScore,
-            fallbackUsed: aiAnalysis.fallbackUsed,
+            fallbackUsed: aiAnalysis.fallbackUsed
           });
         }
       } catch (error) {
         logger.error("AI analysis failed, using standard matching", { error });
         aiAnalysis = null;
       }
-
+      
       // Log the request
       const responseTime = Date.now() - startTime;
       await storage.createRequestLog({
@@ -492,66 +349,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responseTime,
         requestBody: JSON.stringify(req.body),
       });
-
+      
       logger.info("Matched technicians for job", {
         jobId,
         jobDate,
         jobType,
         matchCount: availableTechnicians.length,
-        responseTime,
+        responseTime
       });
-
+      
       // Update the job with proposed staffing if we found technicians
       if (availableTechnicians.length > 0) {
         const bestMatch = availableTechnicians[0]; // Get the highest scoring technician
         const proposedStaffingText = `${bestMatch.technician.fields.Name} (${bestMatch.matchScore}% match)`;
-
-        // Update job in Airtable via middleware
-        try {
-          logger.info("Attempting to update job staffing", {
-            jobId,
-            url: `${process.env.MIDDLEWARE_URL}/api/Job%20Intake/${jobId}`,
-            proposedStaffing: proposedStaffingText,
-            matchScore: bestMatch.matchScore,
-          });
-
-          const updateResponse = await fetch(
-            `${process.env.MIDDLEWARE_URL}/api/Job%20Intake/${jobId}`,
-            {
-              method: "PATCH",
-              headers: {
-                Authorization: `Bearer ${process.env.MIDDLEWARE_KEY}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                fields: {
-                  "Proposed Staffing": proposedStaffingText,
-                  "Match Score": bestMatch.matchScore,
-                },
-              }),
-            },
-          );
-
-          const responseText = await updateResponse.text();
-          
-          if (!updateResponse.ok) {
-            logger.warn("Failed to update job staffing in Airtable", {
-              jobId,
-              status: updateResponse.status,
-              responseText,
-            });
-          } else {
-            logger.info("Successfully updated job staffing", {
-              jobId,
-              responseText,
-            });
-          }
-        } catch (error) {
-          logger.error("Error updating job staffing in Airtable", {
-            error: error instanceof Error ? error.message : String(error),
-            jobId,
-          });
-        }
+        
+        await storage.updateJobStaffing(jobId, proposedStaffingText, bestMatch.matchScore);
       }
 
       res.json({
@@ -563,26 +375,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
             scheduledDate: job.scheduledDate,
             scheduledTime: job.scheduledTime,
             jobType: job.jobType,
-            techsNeeded: job.techsNeeded,
+            techsNeeded: job.techsNeeded
           },
           proposedStaffing: availableTechnicians,
-          aiAnalysis: aiAnalysis
-            ? {
-                teamComposition: aiAnalysis.teamComposition,
-                topRecommendation: aiAnalysis.topRecommendation,
-                alternatives: aiAnalysis.alternatives,
-                jobAnalysis: aiAnalysis.jobAnalysis,
-                analysisTimestamp: aiAnalysis.analysisTimestamp,
-                fallbackUsed: aiAnalysis.fallbackUsed,
-              }
-            : null,
+          aiAnalysis: aiAnalysis ? {
+            teamComposition: aiAnalysis.teamComposition,
+            topRecommendation: aiAnalysis.topRecommendation,
+            alternatives: aiAnalysis.alternatives,
+            jobAnalysis: aiAnalysis.jobAnalysis,
+            analysisTimestamp: aiAnalysis.analysisTimestamp,
+            fallbackUsed: aiAnalysis.fallbackUsed
+          } : null,
           metadata: {
             requestDate: jobDate,
             totalMatches: availableTechnicians.length,
-            timestamp: new Date().toISOString(),
-          },
-        },
+            timestamp: new Date().toISOString()
+          }
+        }
       });
+      
     } catch (error) {
       const responseTime = Date.now() - startTime;
       await storage.createRequestLog({
@@ -592,15 +403,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responseTime,
         requestBody: JSON.stringify(req.body),
       });
-
-      logger.error("Failed to match technicians for job", {
-        error,
-        jobId: req.params.jobId,
-      });
+      
+      logger.error("Failed to match technicians for job", { error, jobId: req.params.jobId });
       res.status(500).json({
         status: "error",
         message: "Failed to match technicians",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: error instanceof Error ? error.message : "Unknown error"
       });
     }
   });
@@ -609,18 +417,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/airtable/health", async (req, res) => {
     try {
       const airtableStatus = await airtableService.checkHealth();
-
+      
       res.json({
         status: "success",
         data: airtableStatus,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date().toISOString()
       });
     } catch (error) {
       logger.error("Airtable health check failed", { error });
       res.status(500).json({
         status: "error",
         message: "Airtable health check failed",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: error instanceof Error ? error.message : "Unknown error"
       });
     }
   });
@@ -628,51 +436,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Manual Airtable sync endpoint
   app.post("/api/airtable/sync", async (req, res) => {
     const startTime = Date.now();
-
+    
     try {
       // Get active technicians to test sync
       const technicians = await airtableService.getActiveTechnicians();
-
+      
       const responseTime = Date.now() - startTime;
-
+      
       logger.info("Manual Airtable sync completed", {
         technicianCount: technicians.length,
-        responseTime,
+        responseTime
       });
-
+      
       res.json({
         status: "success",
         data: {
           recordsProcessed: technicians.length,
           responseTime,
-          timestamp: new Date().toISOString(),
+          timestamp: new Date().toISOString()
         },
-        message: "Airtable sync completed successfully",
+        message: "Airtable sync completed successfully"
       });
+      
     } catch (error) {
       const responseTime = Date.now() - startTime;
       logger.error("Manual Airtable sync failed", { error, responseTime });
-
+      
       res.status(500).json({
         status: "error",
         message: "Airtable sync failed",
         error: error instanceof Error ? error.message : "Unknown error",
-        responseTime,
+        responseTime
       });
     }
   });
 
   // Helper function for match reasoning (define inline to avoid 'this' context issues)
-  const generateMatchReasoning = (
-    technician: any,
-    jobType?: string,
-    matchScore?: number,
-  ): string => {
+  const generateMatchReasoning = (technician: any, jobType?: string, matchScore?: number): string => {
     if (!jobType) return "General availability match";
-
+    
     const certifications = technician.Certifications || [];
     const reasons = [];
-
+    
     if (matchScore && matchScore > 75) {
       reasons.push("Excellent certification match");
     } else if (matchScore && matchScore > 50) {
@@ -680,48 +485,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } else {
       reasons.push("Basic availability match");
     }
-
-    if (
-      certifications.some((cert: string) =>
-        cert.toLowerCase().includes(jobType.toLowerCase()),
-      )
-    ) {
+    
+    if (certifications.some((cert: string) => cert.toLowerCase().includes(jobType.toLowerCase()))) {
       reasons.push(`Direct ${jobType} certification`);
     }
-
+    
     return reasons.join(", ");
   };
 
   // Delete job endpoint
   app.delete("/api/jobs/:jobId", async (req, res) => {
     const startTime = Date.now();
-
+    
     try {
       const { jobId } = req.params;
-
+      
       if (!jobId) {
         return res.status(400).json({
           status: "error",
-          message: "Job ID is required",
+          message: "Job ID is required"
         });
       }
-
+      
       // First delete any job assignments (cascade delete)
       await db.delete(jobAssignments).where(eq(jobAssignments.jobId, jobId));
-
+      
       // Then delete the job
-      const deletedJob = await db
-        .delete(jobs)
-        .where(eq(jobs.id, jobId))
-        .returning();
-
+      const deletedJob = await db.delete(jobs).where(eq(jobs.id, jobId)).returning();
+      
       if (deletedJob.length === 0) {
         return res.status(404).json({
-          status: "error",
-          message: "Job not found",
+          status: "error", 
+          message: "Job not found"
         });
       }
-
+      
       // Log the request
       const responseTime = Date.now() - startTime;
       await storage.createRequestLog({
@@ -731,19 +529,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responseTime,
         requestBody: null,
       });
-
+      
       logger.info("Job deleted successfully", { jobId, responseTime });
-
+      
       res.json({
         status: "success",
         message: "Job deleted successfully",
-        deletedJobId: jobId,
+        deletedJobId: jobId
       });
+      
     } catch (error) {
       logger.error("Failed to delete job", { error, jobId: req.params.jobId });
       res.status(500).json({
         status: "error",
-        message: "Failed to delete job",
+        message: "Failed to delete job"
       });
     }
   });

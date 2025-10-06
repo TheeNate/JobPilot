@@ -122,7 +122,7 @@ Focus on technical requirements like certifications (UT Level I/II, RT, MT, PT, 
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-3-5-sonnet-20241022',
           max_tokens: 1000,
           messages: [{
             role: 'user',
@@ -211,13 +211,13 @@ ${techniciansData.map(t => `
 
 Task: 
 ${Number(jobDetails.techsNeeded) > 1 ? 
-  `Rank ALL available technicians for this ${jobDetails.techsNeeded}-person team job. 
-   Assign roles to each technician (Lead, Specialist, Support) based on qualifications.
-   Consider: skill matching, team dynamics, coordination capabilities, safety factors.
-   Return ALL ${techniciansData.length} technicians ranked from best to worst fit.` :
-  `Rank ALL available technicians for this single-technician job from best to worst fit.`}
+  `Recommend a team of ${jobDetails.techsNeeded} technicians with complementary skills and assign roles:
+   - Primary Lead: Most experienced/certified for job type
+   - Support Members: Complementary skills, safety backup
+   - Consider team dynamics, skill coverage, and coordination` :
+  `Recommend the single best technician for this job`}
 
-Provide JSON response as an ARRAY of ALL ${techniciansData.length} technicians ranked by suitability:
+Provide JSON response as an ARRAY of recommended technicians:
 [
   {
     "name": "Technician Name",
@@ -242,7 +242,7 @@ Return ONLY the JSON array, no other text.
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-3-5-sonnet-20241022',
           max_tokens: 2000,
           messages: [{
             role: 'user',
