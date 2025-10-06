@@ -146,6 +146,7 @@ export class AirtableService {
     try {
       // Try multiple common table names for technicians
       const possibleTableNames = [
+        "Scheduler",
         "Technicians",
         "Staff",
         "Team Members",
