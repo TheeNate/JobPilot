@@ -6,7 +6,7 @@ import { RefreshCw, Briefcase, Clock, MapPin, User, Trash2, Users, Star, UserChe
 import { format } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 
@@ -299,8 +299,8 @@ export function Jobs() {
                 </TableHeader>
                 <TableBody>
                   {jobs?.map((job) => (
-                    <>
-                      <TableRow key={job.id} className="hover:bg-muted/50">
+                    <Fragment key={job.id}>
+                      <TableRow className="hover:bg-muted/50">
                         <TableCell className="font-mono text-xs text-muted-foreground">
                           {format(new Date(job.createdAt), "MMM dd, yyyy HH:mm")}
                         </TableCell>
@@ -608,7 +608,7 @@ export function Jobs() {
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                    </Fragment>
                   ))}
                 </TableBody>
               </Table>
