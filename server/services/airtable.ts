@@ -144,9 +144,9 @@ export class AirtableService {
    */
   async getActiveTechnicians(): Promise<AirtableRecord<TechnicianFields>[]> {
     try {
-      // Try multiple common table names for technicians
+      // Try multiple common table names for technicians - prioritize Scheduler
       const possibleTableNames = [
-        "Scheduler",
+        "Scheduler", // Primary table name
         "Technicians",
         "Staff",
         "Team Members",
