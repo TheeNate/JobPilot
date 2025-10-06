@@ -147,9 +147,7 @@ export class AirtableService {
       // Try multiple common table names for technicians
       const possibleTableNames = [
         "Technicians",
-        "Employees",
         "Staff",
-        "Workers",
         "Team Members",
       ];
       const tableNameEnv = process.env.AIRTABLE_TECHNICIANS_TABLE;
