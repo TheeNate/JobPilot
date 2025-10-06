@@ -54,6 +54,21 @@ The service implements a structured approach to email processing:
 4. **Data Persistence** - Stores parsed information in PostgreSQL
 5. **Logging** - Records all requests for monitoring and debugging
 
+## AI-Powered Technician Matching
+The application features intelligent team-based technician matching using Claude AI:
+- **Strategic Team Building** - Analyzes job requirements and builds appropriate team compositions
+- **Role Assignment** - Assigns Lead, Specialist, and Support roles based on certifications and experience
+- **Team Dynamics Analysis** - Provides coordination plans and team compatibility assessments
+- **Alternative Teams** - Suggests multiple team configurations for multi-technician jobs
+- **Fallback Logic** - Uses enhanced logic-based matching when AI is unavailable
+
+### Team Matching Features
+- **Single-Tech Jobs** - Recommends best individual technician with alternatives
+- **Multi-Tech Jobs** - Builds complete team with roles, dynamics, and coordination plans
+- **Alternative Teams** - Provides 2-3 alternative team compositions with reasoning
+- **Certification Matching** - Matches NDT certifications (UT, RT, MT, PT, VT) to job requirements
+- **Safety Coverage** - Ensures safety-critical skills (rope access, confined space) are covered
+
 ## Development and Deployment
 - **TypeScript** throughout the stack for type safety
 - **ESM modules** for modern JavaScript practices
@@ -71,6 +86,10 @@ The service implements a structured approach to email processing:
 ## Email Processing
 - **Mailgun** (planned) - Email service for sending reply confirmations
 - Currently accepts webhook payloads but email sending is not yet implemented
+
+## AI and External Services
+- **Anthropic Claude API** - AI-powered technician matching and job analysis
+- **Airtable** - Technician database and availability tracking
 
 ## Frontend Libraries
 - **Radix UI** - Accessible component primitives for the dashboard

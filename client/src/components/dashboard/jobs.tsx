@@ -124,7 +124,7 @@ export function Jobs() {
         } catch (error) {
           console.error('Failed to fetch AI analysis:', error);
         } finally {
-          setLoadingAnalysis(new Set([...loadingAnalysis].filter(id => id !== jobId)));
+          setLoadingAnalysis(new Set(Array.from(loadingAnalysis).filter(id => id !== jobId)));
         }
       }
     }
@@ -298,7 +298,7 @@ export function Jobs() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {jobs.map((job) => (
+                  {jobs?.map((job) => (
                     <>
                       <TableRow key={job.id} className="hover:bg-muted/50">
                         <TableCell className="font-mono text-xs text-muted-foreground">
@@ -422,37 +422,65 @@ export function Jobs() {
                                 </div>
                               ) : aiAnalysis.has(job.id) ? (
                                 <div className="grid gap-4 md:grid-cols-2">
-                                  {/* Top Recommendation */}
-                                  {aiAnalysis.get(job.id)?.aiAnalysis?.topRecommendation && (
-                                    <Card>
+                                  {/* Team Composition or Top Recommendation */}
+                                  {aiAnalysis.get(job.id)?.aiAnalysis?.teamComposition && (
+                                    <Card className={aiAnalysis.get(job.id).aiAnalysis.teamComposition.size > 1 ? "md:col-span-2" : ""}>
                                       <CardHeader className="pb-2">
                                         <CardTitle className="text-sm flex items-center space-x-2">
                                           <Star className="h-4 w-4 text-yellow-500" />
-                                          <span>Top Recommendation</span>
+                                          <span>
+                                            {aiAnalysis.get(job.id).aiAnalysis.teamComposition.size > 1 
+                                              ? `Recommended Team (${aiAnalysis.get(job.id).aiAnalysis.teamComposition.size} technicians)` 
+                                              : 'Top Recommendation'}
+                                          </span>
                                         </CardTitle>
                                       </CardHeader>
                                       <CardContent className="pt-0">
-                                        <div className="space-y-2">
-                                          <div className="flex items-center justify-between">
-                                            <span className="font-medium">
-                                              {aiAnalysis.get(job.id).aiAnalysis.topRecommendation.technician.name}
-                                            </span>
-                                            <Badge variant="default">
-                                              {aiAnalysis.get(job.id).aiAnalysis.topRecommendation.confidenceScore}% match
-                                            </Badge>
-                                          </div>
-                                          <div className="text-sm text-muted-foreground space-y-1">
-                                            {aiAnalysis.get(job.id).aiAnalysis.topRecommendation.reasoning?.map((reason: string, idx: number) => (
-                                              <div key={idx} className="flex items-start space-x-2">
-                                                <span className="text-green-500 mt-0.5">✓</span>
-                                                <span>{reason}</span>
+                                        <div className="space-y-3">
+                                          {aiAnalysis.get(job.id).aiAnalysis.teamComposition.members?.map((member: any, idx: number) => (
+                                            <div key={idx} className="border rounded-md p-3 bg-background">
+                                              <div className="flex items-center justify-between mb-2">
+                                                <div className="flex items-center space-x-2">
+                                                  <User className="h-4 w-4 text-blue-500" />
+                                                  <span className="font-medium">{member.technician.name}</span>
+                                                  {member.role && (
+                                                    <Badge variant={member.role === 'Lead' ? 'default' : member.role === 'Specialist' ? 'secondary' : 'outline'} className="text-xs">
+                                                      {member.role}
+                                                    </Badge>
+                                                  )}
+                                                </div>
+                                                <Badge variant="default">
+                                                  {member.confidenceScore}% match
+                                                </Badge>
                                               </div>
-                                            ))}
-                                          </div>
-                                          <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                                            <Clock className="h-3 w-3" />
-                                            <span>Status: {aiAnalysis.get(job.id).aiAnalysis.topRecommendation.availabilityStatus}</span>
-                                          </div>
+                                              <div className="text-sm text-muted-foreground space-y-1 ml-6">
+                                                {member.reasoning?.map((reason: string, ridx: number) => (
+                                                  <div key={ridx} className="flex items-start space-x-2">
+                                                    <span className="text-green-500 mt-0.5">✓</span>
+                                                    <span>{reason}</span>
+                                                  </div>
+                                                ))}
+                                                <div className="flex items-center space-x-2 text-xs pt-1">
+                                                  <Clock className="h-3 w-3" />
+                                                  <span>Status: {member.availabilityStatus}</span>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          ))}
+                                          
+                                          {aiAnalysis.get(job.id).aiAnalysis.teamComposition.teamDynamics && (
+                                            <div className="mt-3 p-2 bg-blue-50 dark:bg-blue-950 rounded text-sm">
+                                              <span className="font-medium text-blue-900 dark:text-blue-100">Team Dynamics: </span>
+                                              <span className="text-blue-800 dark:text-blue-200">{aiAnalysis.get(job.id).aiAnalysis.teamComposition.teamDynamics}</span>
+                                            </div>
+                                          )}
+                                          
+                                          {aiAnalysis.get(job.id).aiAnalysis.teamComposition.coordinationPlan && (
+                                            <div className="p-2 bg-purple-50 dark:bg-purple-950 rounded text-sm">
+                                              <span className="font-medium text-purple-900 dark:text-purple-100">Coordination: </span>
+                                              <span className="text-purple-800 dark:text-purple-200">{aiAnalysis.get(job.id).aiAnalysis.teamComposition.coordinationPlan}</span>
+                                            </div>
+                                          )}
                                         </div>
                                       </CardContent>
                                     </Card>
@@ -496,8 +524,49 @@ export function Jobs() {
                                     </Card>
                                   )}
 
-                                  {/* Alternative Options */}
-                                  {aiAnalysis.get(job.id)?.aiAnalysis?.alternatives?.length > 0 && (
+                                  {/* Alternative Team Compositions or Individual Alternatives */}
+                                  {aiAnalysis.get(job.id)?.aiAnalysis?.alternativeTeams?.length > 0 ? (
+                                    <Card className="md:col-span-2">
+                                      <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm">Alternative Team Options</CardTitle>
+                                      </CardHeader>
+                                      <CardContent className="pt-0">
+                                        <div className="space-y-3">
+                                          {aiAnalysis.get(job.id).aiAnalysis.alternativeTeams.slice(0, 2).map((altTeam: any, tidx: number) => (
+                                            <div key={tidx} className="border rounded-md p-3 bg-muted/30">
+                                              <div className="font-medium text-sm mb-2 flex items-center space-x-2">
+                                                <Users className="h-4 w-4 text-blue-500" />
+                                                <span>Team {tidx + 2}</span>
+                                                {altTeam.size && <Badge variant="outline" className="text-xs">{altTeam.size} technicians</Badge>}
+                                              </div>
+                                              <div className="space-y-2 ml-6">
+                                                {altTeam.members?.map((member: any, midx: number) => (
+                                                  <div key={midx} className="text-sm">
+                                                    <div className="flex items-center space-x-2">
+                                                      <span className="font-medium">{member.technician.name}</span>
+                                                      {member.role && (
+                                                        <Badge variant={member.role === 'Lead' ? 'default' : 'outline'} className="text-xs">
+                                                          {member.role}
+                                                        </Badge>
+                                                      )}
+                                                      <Badge variant="secondary" className="text-xs">
+                                                        {member.confidenceScore}% match
+                                                      </Badge>
+                                                    </div>
+                                                  </div>
+                                                ))}
+                                                {altTeam.teamReasoning && (
+                                                  <div className="text-xs text-muted-foreground mt-2 italic">
+                                                    {altTeam.teamReasoning}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  ) : aiAnalysis.get(job.id)?.aiAnalysis?.alternatives?.length > 0 && (
                                     <Card className="md:col-span-2">
                                       <CardHeader className="pb-2">
                                         <CardTitle className="text-sm">Alternative Options</CardTitle>

@@ -382,6 +382,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             teamComposition: aiAnalysis.teamComposition,
             topRecommendation: aiAnalysis.topRecommendation,
             alternatives: aiAnalysis.alternatives,
+            alternativeTeams: aiAnalysis.alternativeTeams,
             jobAnalysis: aiAnalysis.jobAnalysis,
             analysisTimestamp: aiAnalysis.analysisTimestamp,
             fallbackUsed: aiAnalysis.fallbackUsed

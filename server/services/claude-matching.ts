@@ -7,6 +7,21 @@ import type { TechnicianFields, AirtableRecord } from './airtable';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const API_KEY = process.env.ANTHROPIC_API_KEY || '';
 
+// Strategic team building system prompt
+const SYSTEM_PROMPT = `You are an expert industrial scheduling coordinator who matches qualified technicians to job requirements. You understand NDT certifications, safety requirements, team dynamics, and operational considerations.
+
+Your job is to analyze job requests and build appropriately skilled teams. Consider all required skills and certifications, then suggest a team lead and supporting members.
+
+Team composition principles:
+- Ensure all critical job requirements are covered by qualified personnel
+- Assign most experienced technician as team lead when multiple certifications overlap
+- Build competent teams without over-staffing high-skill technicians on routine work
+- Maintain skill redundancy for safety-critical operations (RT, confined space, rope access)
+- Reserve your most versatile technicians for complex jobs requiring multiple certifications
+- Use this as an opportunity to pair experienced leads with developing technicians when job complexity allows
+
+Balance efficiency with capability: staff jobs appropriately without depleting your skilled workforce for future complex assignments.`;
+
 export interface JobDetails {
   location: string;
   scheduledDate: string;
@@ -45,6 +60,12 @@ export interface AlternativeTechnician {
   availabilityStatus: string;
 }
 
+export interface AlternativeTeam {
+  size: number;
+  members: TeamMember[];
+  teamReasoning: string;
+}
+
 export interface MatchAnalysis {
   teamComposition: {
     size: number;
@@ -53,6 +74,7 @@ export interface MatchAnalysis {
     coordinationPlan?: string;
   };
   alternatives: AlternativeTechnician[];
+  alternativeTeams?: AlternativeTeam[];
   jobAnalysis: {
     complexity: "simple" | "moderate" | "complex";
     requiredSkills: string[];
@@ -124,6 +146,7 @@ Focus on technical requirements like certifications (UT Level I/II, RT, MT, PT, 
         body: JSON.stringify({
           model: 'claude-3-5-sonnet-20241022',
           max_tokens: 1000,
+          system: SYSTEM_PROMPT,
           messages: [{
             role: 'user',
             content: prompt
@@ -165,6 +188,7 @@ Focus on technical requirements like certifications (UT Level I/II, RT, MT, PT, 
 
   /**
    * Rank technicians based on job requirements using AI analysis
+   * Returns team-based recommendations with alternative team compositions
    */
   async rankTechnicians(
     jobDetails: JobDetails,
@@ -173,7 +197,15 @@ Focus on technical requirements like certifications (UT Level I/II, RT, MT, PT, 
       availability: any[];
       matchScore: number;
     }>
-  ): Promise<TeamMember[]> {
+  ): Promise<{
+    recommendedTeam: {
+      size: number;
+      members: TeamMember[];
+      teamDynamics?: string;
+      coordinationPlan?: string;
+    };
+    alternativeTeams: AlternativeTeam[];
+  }> {
     if (!this.isConfigured || availableTechnicians.length === 0) {
       return this.fallbackRanking(jobDetails, availableTechnicians);
     }
@@ -192,46 +224,64 @@ Focus on technical requirements like certifications (UT Level I/II, RT, MT, PT, 
         }))
       }));
 
+      const requiredTeamSize = Number(jobDetails.techsNeeded) || 1;
+      const isMultiTechJob = requiredTeamSize > 1;
+      
       const prompt = `
-Analyze and recommend technician staffing for this job:
+Analyze this job and recommend ${requiredTeamSize} technician(s):
 
 Job Details:
 - Type: ${jobDetails.jobType}
 - Location: ${jobDetails.location}
 - Date/Time: ${jobDetails.scheduledDate} at ${jobDetails.scheduledTime}
+- Technicians Required: ${requiredTeamSize}
 - Description: ${jobDetails.bodyPlain}
-- Technicians Required: ${jobDetails.techsNeeded || 1}
 
 Available Technicians:
 ${techniciansData.map(t => `
-- ${t.name} (${t.status})
-  Certifications: ${t.certifications.join(', ') || 'None listed'}
-  Availability: ${t.availability.map(a => `${a.periodType} ${a.startDate}${a.endDate ? ' to ' + a.endDate : ''}`).join('; ')}
+- ${t.name}: ${t.certifications.join(', ') || 'No certifications'}
+  Status: ${t.status}
+  Availability: ${t.availability.map(a => a.periodType).join(', ') || 'Not specified'}
 `).join('')}
 
-Task: 
-${Number(jobDetails.techsNeeded) > 1 ? 
-  `Recommend a team of ${jobDetails.techsNeeded} technicians with complementary skills and assign roles:
-   - Primary Lead: Most experienced/certified for job type
-   - Support Members: Complementary skills, safety backup
-   - Consider team dynamics, skill coverage, and coordination` :
-  `Recommend the single best technician for this job`}
+${isMultiTechJob ? 
+  `Build a ${requiredTeamSize}-person team with appropriate roles and explain why this combination works. Also provide 2-3 alternative team compositions.` :
+  `Recommend the best individual technician and provide 2-3 alternatives.`}
 
-Provide JSON response as an ARRAY of recommended technicians:
-[
-  {
-    "name": "Technician Name",
-    "confidenceScore": 0-100,
-    "role": "Lead" | "Specialist" | "Support",
-    "reasoning": ["reason1", "reason2"],
-    "availabilityStatus": "Excellent" | "Good" | "Limited" | "Unavailable",
-    "teamDynamics": "Brief explanation (for multi-tech jobs only)",
-    "coordinationPlan": "Leadership plan (for multi-tech jobs only)"
-  }
-]
+Return JSON in this exact format:
+{
+  "recommendedTeam": {
+    "size": ${requiredTeamSize},
+    "members": [
+      {
+        "name": "Exact technician name",
+        "role": "Lead" | "Specialist" | "Support",
+        "confidenceScore": 85,
+        "reasoning": ["specific reason 1", "specific reason 2"],
+        "availabilityStatus": "Excellent" | "Good" | "Limited"
+      }
+    ],
+    "teamDynamics": "${isMultiTechJob ? 'Team coordination explanation' : 'Individual assignment'}",
+    "coordinationPlan": "${isMultiTechJob ? 'Leadership structure' : 'Solo technician plan'}"
+  },
+  "alternativeTeams": [
+    {
+      "size": ${requiredTeamSize},
+      "members": [
+        {
+          "name": "Technician name",
+          "role": "Lead" | "Specialist" | "Support",
+          "confidenceScore": 80,
+          "reasoning": ["reason 1", "reason 2"],
+          "availabilityStatus": "Good"
+        }
+      ],
+      "teamReasoning": "Why this alternative works"
+    }
+  ]
+}
 
-Consider: certifications matching job type (UT, RT, MT, PT, VT), availability, experience levels, team compatibility.
-Return ONLY the JSON array, no other text.
+Return ONLY valid JSON, no other text.
 `;
 
       const response = await fetch(ANTHROPIC_API_URL, {
@@ -243,7 +293,8 @@ Return ONLY the JSON array, no other text.
         },
         body: JSON.stringify({
           model: 'claude-3-5-sonnet-20241022',
-          max_tokens: 2000,
+          max_tokens: 3000,
+          system: SYSTEM_PROMPT,
           messages: [{
             role: 'user',
             content: prompt
@@ -262,44 +313,94 @@ Return ONLY the JSON array, no other text.
         throw new Error('Unexpected response type from Claude');
       }
 
-      const rankings = JSON.parse(content.text);
+      const teamResponse = JSON.parse(content.text);
       
-      // Ensure rankings is an array
-      if (!Array.isArray(rankings)) {
-        logger.warn("Claude returned non-array response, using fallback", { rankingsType: typeof rankings });
+      // Validate response structure
+      if (!teamResponse.recommendedTeam || !Array.isArray(teamResponse.recommendedTeam.members)) {
+        logger.warn("Claude returned invalid response structure, using fallback", { response: teamResponse });
         return this.fallbackRanking(jobDetails, availableTechnicians);
       }
 
-      // Map Claude results to team members
-      const teamMembers: TeamMember[] = rankings.map((ranking: any) => {
-        const technicianData = techniciansData.find(t => t.name === ranking.name || t.id === ranking.id);
-        if (!technicianData) {
-          throw new Error(`Technician not found: ${ranking.name || ranking.id}`);
-        }
+      // Process recommended team members with robust name matching
+      const processMembers = (members: any[]): TeamMember[] => {
+        return members.map((member: any) => {
+          // Try to find technician by name (case-insensitive) or ID
+          const technicianData = techniciansData.find(t => 
+            t.name.toLowerCase() === (member.name || '').toLowerCase() || 
+            t.id === member.id ||
+            t.name.includes(member.name) ||
+            (member.name || '').includes(t.name)
+          );
+          
+          if (!technicianData) {
+            logger.warn("Technician not found in available data, using fallback", { 
+              memberName: member.name, 
+              memberId: member.id,
+              availableNames: techniciansData.map(t => t.name)
+            });
+            
+            // Return a fallback structure with partial data
+            return {
+              technician: {
+                id: member.id || "unknown",
+                name: member.name || "Unknown Technician",
+                certifications: [],
+                status: "Unknown"
+              },
+              confidenceScore: Math.max(0, Math.min(100, member.confidenceScore || 50)),
+              role: (["Lead", "Specialist", "Support"].includes(member.role) ? member.role : "Support") as "Lead" | "Specialist" | "Support",
+              reasoning: member.reasoning || [`Matched for ${jobDetails.jobType} job`],
+              availabilityStatus: member.availabilityStatus || "Unknown"
+            };
+          }
 
-        // Validate role
-        const validRoles = ["Lead", "Specialist", "Support"] as const;
-        const role = validRoles.includes(ranking.role) ? ranking.role : "Support";
+          const validRoles = ["Lead", "Specialist", "Support"] as const;
+          const role = validRoles.includes(member.role) ? member.role : "Support";
 
-        return {
-          technician: technicianData,
-          confidenceScore: Math.max(0, Math.min(100, ranking.confidenceScore || 50)),
-          role,
-          reasoning: ranking.reasoning || [`Matched for ${jobDetails.jobType} job`],
-          availabilityStatus: ranking.availabilityStatus || "Good"
-        };
-      });
+          return {
+            technician: technicianData,
+            confidenceScore: Math.max(0, Math.min(100, member.confidenceScore || 50)),
+            role,
+            reasoning: member.reasoning || [`Matched for ${jobDetails.jobType} job`],
+            availabilityStatus: member.availabilityStatus || "Good"
+          };
+        });
+      };
 
-      // Sort by confidence score
-      teamMembers.sort((a, b) => b.confidenceScore - a.confidenceScore);
+      const recommendedTeamMembers = processMembers(teamResponse.recommendedTeam.members);
+      
+      // Process alternative teams
+      const alternativeTeams: AlternativeTeam[] = (teamResponse.alternativeTeams || []).map((altTeam: any) => ({
+        size: altTeam.size || altTeam.members.length,
+        members: processMembers(altTeam.members),
+        teamReasoning: altTeam.teamReasoning || "Alternative team composition"
+      }));
 
-      logger.info("Claude technician ranking completed", {
+      // Validate team size matches job requirements
+      const requiredSize = Number(jobDetails.techsNeeded) || 1;
+      if (recommendedTeamMembers.length !== requiredSize) {
+        logger.warn("Team size mismatch", {
+          requested: requiredSize,
+          recommended: recommendedTeamMembers.length
+        });
+      }
+
+      logger.info("Claude team-based ranking completed", {
         jobType: jobDetails.jobType,
-        technicianCount: teamMembers.length,
-        topScore: teamMembers[0]?.confidenceScore || 0
+        teamSize: recommendedTeamMembers.length,
+        alternativeTeamsCount: alternativeTeams.length,
+        topScore: recommendedTeamMembers[0]?.confidenceScore || 0
       });
 
-      return teamMembers;
+      return {
+        recommendedTeam: {
+          size: recommendedTeamMembers.length,
+          members: recommendedTeamMembers,
+          teamDynamics: teamResponse.recommendedTeam.teamDynamics,
+          coordinationPlan: teamResponse.recommendedTeam.coordinationPlan
+        },
+        alternativeTeams
+      };
 
     } catch (error) {
       logger.error("Claude technician ranking failed, using fallback", { error });
@@ -323,53 +424,37 @@ Return ONLY the JSON array, no other text.
 
     try {
       // Get job analysis and technician rankings
-      const [jobAnalysis, teamMembers] = await Promise.all([
+      const [jobAnalysis, teamRanking] = await Promise.all([
         this.analyzeJobRequirements(jobDetails),
         this.rankTechnicians(jobDetails, availableTechnicians)
       ]);
 
-      if (teamMembers.length === 0) {
+      if (teamRanking.recommendedTeam.members.length === 0) {
         throw new Error("No technicians available for analysis");
       }
 
-      const requiredTeamSize = Number(jobDetails.techsNeeded) || 1;
-      const selectedTeam = teamMembers.slice(0, requiredTeamSize);
-      
-      // Ensure we have a lead for multi-tech teams
-      if (selectedTeam.length > 1 && !selectedTeam.some(m => m.role === "Lead")) {
-        selectedTeam[0].role = "Lead";
-      }
+      const { recommendedTeam, alternativeTeams } = teamRanking;
 
-      const alternatives = teamMembers.slice(requiredTeamSize).map(member => ({
-        technician: member.technician,
-        confidenceScore: member.confidenceScore,
-        reasoning: member.reasoning,
-        availabilityStatus: member.availabilityStatus
-      }));
-
-      // Extract team dynamics from team members if available
-      const teamDynamics = selectedTeam.length > 1 
-        ? `Team of ${selectedTeam.length} with ${selectedTeam[0].technician.name} as lead technician`
-        : undefined;
-
-      const coordinationPlan = selectedTeam.length > 1
-        ? `${selectedTeam[0].technician.name} (${selectedTeam[0].role}) leads coordination and technical oversight. Team roles: ${selectedTeam.map(m => `${m.technician.name} (${m.role})`).join(', ')}`
-        : undefined;
+      // Build individual alternatives list for backward compatibility
+      const alternatives: AlternativeTechnician[] = alternativeTeams.flatMap(team => 
+        team.members.map(member => ({
+          technician: member.technician,
+          confidenceScore: member.confidenceScore,
+          reasoning: member.reasoning,
+          availabilityStatus: member.availabilityStatus
+        }))
+      );
 
       const analysis: MatchAnalysis = {
-        teamComposition: {
-          size: selectedTeam.length,
-          members: selectedTeam,
-          teamDynamics,
-          coordinationPlan
-        },
+        teamComposition: recommendedTeam,
         topRecommendation: {
-          technician: selectedTeam[0].technician,
-          confidenceScore: selectedTeam[0].confidenceScore,
-          reasoning: selectedTeam[0].reasoning,
-          availabilityStatus: selectedTeam[0].availabilityStatus
+          technician: recommendedTeam.members[0].technician,
+          confidenceScore: recommendedTeam.members[0].confidenceScore,
+          reasoning: recommendedTeam.members[0].reasoning,
+          availabilityStatus: recommendedTeam.members[0].availabilityStatus
         },
         alternatives,
+        alternativeTeams,
         jobAnalysis,
         analysisTimestamp: new Date().toISOString(),
         fallbackUsed
@@ -378,10 +463,10 @@ Return ONLY the JSON array, no other text.
       const responseTime = Date.now() - startTime;
       logger.info("Complete match analysis generated", {
         jobType: jobDetails.jobType,
-        teamSize: selectedTeam.length,
-        topMatch: selectedTeam[0].technician.name,
-        score: selectedTeam[0].confidenceScore,
-        alternativeCount: alternatives.length,
+        teamSize: recommendedTeam.size,
+        topMatch: recommendedTeam.members[0].technician.name,
+        score: recommendedTeam.members[0].confidenceScore,
+        alternativeTeamsCount: alternativeTeams.length,
         responseTime,
         fallbackUsed
       });
@@ -474,11 +559,19 @@ Return ONLY the JSON array, no other text.
       availability: any[];
       matchScore: number;
     }>
-  ): TeamMember[] {
+  ): {
+    recommendedTeam: {
+      size: number;
+      members: TeamMember[];
+      teamDynamics?: string;
+      coordinationPlan?: string;
+    };
+    alternativeTeams: AlternativeTeam[];
+  } {
     const jobType = jobDetails.jobType?.toLowerCase() || "";
     const requiredTeamSize = Number(jobDetails.techsNeeded) || 1;
     
-    return availableTechnicians.map((t, index) => {
+    const allMembers = availableTechnicians.map((t, index) => {
       const certifications = t.technician.fields["Technician Certifications"] || [];
       let score = 50; // Base score
       
@@ -495,19 +588,12 @@ Return ONLY the JSON array, no other text.
         score += 10;
       }
 
-      const reasoning = [`Basic match for ${jobDetails.jobType} job`];
+      const reasoning = [`Basic match for ${jobDetails.jobType || 'job'}`];
       if (certifications.length > 0) {
         reasoning.push(`Has certifications: ${certifications.join(', ')}`);
       }
       if (t.availability.length > 0) {
         reasoning.push("Has availability records");
-      }
-
-      // Assign roles for multi-tech teams
-      let role: "Lead" | "Specialist" | "Support" = "Support";
-      if (requiredTeamSize > 1) {
-        if (index === 0) role = "Lead";
-        else if (score > 70) role = "Specialist";
       }
 
       return {
@@ -518,11 +604,59 @@ Return ONLY the JSON array, no other text.
           status: t.technician.fields.Status
         },
         confidenceScore: Math.min(100, Math.max(0, score)),
-        role,
+        role: "Support" as const,
         reasoning,
-        availabilityStatus: "Good"
+        availabilityStatus: "Good" as const
       };
     }).sort((a, b) => b.confidenceScore - a.confidenceScore);
+
+    // Assign roles to recommended team
+    const recommendedMembers = allMembers.slice(0, requiredTeamSize).map((member, index) => ({
+      ...member,
+      role: (index === 0 && requiredTeamSize > 1 ? "Lead" : 
+             member.confidenceScore > 70 && requiredTeamSize > 1 ? "Specialist" : 
+             "Support") as "Lead" | "Specialist" | "Support"
+    }));
+
+    // Build alternative teams
+    const alternativeTeams: AlternativeTeam[] = [];
+    if (allMembers.length > requiredTeamSize) {
+      // Create 2 alternative team compositions
+      for (let i = 0; i < Math.min(2, allMembers.length - requiredTeamSize); i++) {
+        const altMembers = [
+          ...allMembers.slice(i + 1, i + 1 + requiredTeamSize)
+        ].map((member, index) => ({
+          ...member,
+          role: (index === 0 && requiredTeamSize > 1 ? "Lead" : "Support") as "Lead" | "Specialist" | "Support"
+        }));
+
+        if (altMembers.length === requiredTeamSize) {
+          alternativeTeams.push({
+            size: requiredTeamSize,
+            members: altMembers,
+            teamReasoning: `Alternative ${i + 1}: Backup team with ${altMembers[0].technician.name} leading`
+          });
+        }
+      }
+    }
+
+    const teamDynamics = requiredTeamSize > 1 
+      ? `Team of ${requiredTeamSize} with ${recommendedMembers[0].technician.name} as lead technician`
+      : undefined;
+
+    const coordinationPlan = requiredTeamSize > 1
+      ? `${recommendedMembers[0].technician.name} (Lead) coordinates team. Roles: ${recommendedMembers.map(m => `${m.technician.name} (${m.role})`).join(', ')}`
+      : undefined;
+
+    return {
+      recommendedTeam: {
+        size: recommendedMembers.length,
+        members: recommendedMembers,
+        teamDynamics,
+        coordinationPlan
+      },
+      alternativeTeams
+    };
   }
 }
 
