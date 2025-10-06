@@ -214,7 +214,7 @@ Focus on technical requirements like certifications (UT Level I/II, RT, MT, PT, 
       const techniciansData = availableTechnicians.map(t => ({
         id: t.technician.id,
         name: t.technician.fields.Name,
-        certifications: t.technician.fields["Technician Certifications"] || [],
+        certifications: t.technician.fields.Certifications || [],
         status: t.technician.fields.Status,
         availability: t.availability.map(a => ({
           periodType: a.fields["Period Type"],
@@ -572,7 +572,7 @@ Return ONLY valid JSON, no other text.
     const requiredTeamSize = Number(jobDetails.techsNeeded) || 1;
     
     const allMembers = availableTechnicians.map((t, index) => {
-      const certifications = t.technician.fields["Technician Certifications"] || [];
+      const certifications = t.technician.fields.Certifications || [];
       let score = 50; // Base score
       
       // Basic certification matching
