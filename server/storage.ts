@@ -19,6 +19,7 @@ export interface IStorage {
   createJob(insertJob: InsertJob): Promise<Job>;
   getJobById(id: string): Promise<Job | undefined>;
   getRecentJobs(limit?: number): Promise<Job[]>;
+  updateJob(id: string, data: Partial<Job>): Promise<Job | undefined>;
   
   // Request logging methods
   createRequestLog(insertLog: InsertRequestLog): Promise<RequestLog>;
@@ -187,6 +188,15 @@ export class DatabaseStorage implements IStorage {
       console.error('Failed to delete job:', error);
       return false;
     }
+  }
+
+  async updateJob(id: string, data: Partial<Job>): Promise<Job | undefined> {
+    const [job] = await db
+      .update(jobs)
+      .set(data)
+      .where(eq(jobs.id, id))
+      .returning();
+    return job || undefined;
   }
 }
 

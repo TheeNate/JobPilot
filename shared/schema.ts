@@ -23,6 +23,8 @@ export const jobs = pgTable("jobs", {
   proposedStaffing: text("proposed_staffing"),
   matchScore: integer("match_score"),
   status: varchar("status", { length: 50 }).notNull().default("pending"),
+  googleDocId: varchar("google_doc_id", { length: 255 }),
+  googleDocUrl: text("google_doc_url"),
   createdAt: timestamp("created_at").default(sql`now()`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`now()`).notNull(),
 });

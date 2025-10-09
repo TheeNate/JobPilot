@@ -6,6 +6,7 @@ import { logger } from "./services/logger";
 import { EmailParser } from "./services/parser";
 import { airtableService } from "./services/airtable";
 import { claudeMatchingService } from "./services/claude-matching";
+import { googleDocsService } from "./services/google-docs";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
@@ -94,6 +95,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const job = await storage.createJob(jobData);
       
+      // NOTE: Thread-based job updates will be implemented in future phase
+      // When an email is matched to an existing thread (job), the logic will:
+      // 1. Check if existingJob.googleDocId exists
+      // 2. Log that document update would occur: logger.info("Would update Google Doc", { docId, direction })
+      // 3. Future: Use Claude to synthesize updates and append to document
+      
+      // Create Google Doc for the job
+      let documentUrl: string | undefined;
+      try {
+        const docResult = await googleDocsService.createJobDocument(job.id, {
+          clientEmail: job.clientEmail,
+          subject: job.subject,
+          location: job.location,
+          scheduledDate: job.scheduledDate,
+          scheduledTime: job.scheduledTime,
+          jobType: job.jobType,
+          techsNeeded: job.techsNeeded,
+          bodyPlain: emailData["body-plain"]
+        });
+        
+        // Update job with Google Doc info
+        await storage.updateJob(job.id, {
+          googleDocId: docResult.docId,
+          googleDocUrl: docResult.docUrl
+        });
+        
+        documentUrl = docResult.docUrl;
+        
+        logger.info("Google Doc created for job", {
+          jobId: job.id,
+          docId: docResult.docId,
+          docUrl: docResult.docUrl
+        });
+      } catch (error) {
+        logger.error("Failed to create Google Doc for job", {
+          jobId: job.id,
+          error: error instanceof Error ? error.message : "Unknown error"
+        });
+        // Continue without failing the job creation
+      }
+      
       // Log the request to database
       const responseTime = Date.now() - startTime;
       await storage.createRequestLog({
@@ -107,14 +149,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       logger.info("Job intake processed successfully", {
         jobId: job.id,
         responseTime,
+        documentUrl,
       });
       
-      res.json({
+      const response: any = {
         status: "success",
-        message: "Job intake request logged successfully",
-        requestId: job.id,
+        message: documentUrl ? "Job created with scope document" : "Job intake request logged successfully",
+        jobId: job.id,
         timestamp: new Date().toISOString(),
-      });
+      };
+      
+      if (documentUrl) {
+        response.documentUrl = documentUrl;
+      }
+      
+      res.json(response);
       
     } catch (error) {
       const responseTime = Date.now() - startTime;
