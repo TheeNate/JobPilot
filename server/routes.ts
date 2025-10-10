@@ -49,6 +49,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           quotaUsed: airtableStatus.quotaUsed,
           lastConnection: airtableStatus.lastConnection
         },
+        googleDocs: {
+          authorized: googleDocsService.isAuthorized(),
+          authUrl: googleDocsService.getAuthUrl()
+        },
         uptime: process.uptime(),
       });
     } catch (error) {
@@ -56,6 +60,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "unhealthy",
         timestamp: new Date().toISOString(),
         error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Google Docs OAuth authorization endpoint
+  app.post("/api/google-docs/authorize", async (req, res) => {
+    try {
+      const { code } = req.body;
+      
+      if (!code) {
+        return res.status(400).json({
+          status: "error",
+          message: "Authorization code is required"
+        });
+      }
+
+      await googleDocsService.authorize(code);
+      
+      res.json({
+        status: "success",
+        message: "Google Docs authorization successful"
+      });
+    } catch (error) {
+      logger.error("Google Docs authorization failed", { error });
+      res.status(500).json({
+        status: "error",
+        message: "Failed to complete authorization",
+        error: error instanceof Error ? error.message : "Unknown error"
       });
     }
   });

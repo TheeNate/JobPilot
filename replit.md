@@ -90,6 +90,11 @@ The application features intelligent team-based technician matching using Claude
 ## AI and External Services
 - **Anthropic Claude API** - AI-powered technician matching and job analysis
 - **Airtable** - Technician database and availability tracking
+- **Google Docs & Drive API** - OAuth2-based document creation for job scope tracking
+  - Uses user credentials (not service account) to create living scope documents
+  - Auto-creates structured Google Docs for each job with client info, scope, questions, and pricing
+  - Documents stored in user's Google Drive with optional folder organization
+  - Supports automatic token refresh for persistent access
 
 ## Frontend Libraries
 - **Radix UI** - Accessible component primitives for the dashboard
