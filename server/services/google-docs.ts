@@ -42,13 +42,18 @@ class GoogleDocsService {
 
       // Read OAuth2 credentials
       const credentials = JSON.parse(readFileSync(credentialsPath, 'utf8'));
-      const { client_id, client_secret, redirect_uris } = credentials.installed || credentials.web;
+      const { client_id, client_secret } = credentials.installed || credentials.web;
+
+      // Construct redirect URI using Replit domain
+      const redirectUri = process.env.REPLIT_DEV_DOMAIN 
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}/api/google-docs/callback`
+        : 'http://localhost:5000/api/google-docs/callback';
 
       // Create OAuth2 client
       this.oauth2Client = new google.auth.OAuth2(
         client_id,
         client_secret,
-        redirect_uris[0]
+        redirectUri
       );
 
       // Check if we have a stored token
