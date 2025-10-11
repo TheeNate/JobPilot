@@ -1,7 +1,6 @@
 import { google, docs_v1, drive_v3 } from 'googleapis';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import { logger } from './logger';
-import { OAuth2Client } from 'google-auth-library';
 
 export interface JobDocumentData {
   clientEmail: string;
@@ -22,9 +21,7 @@ export interface DocumentResult {
 class GoogleDocsService {
   private docs: docs_v1.Docs | null = null;
   private drive: drive_v3.Drive | null = null;
-  private oauth2Client: OAuth2Client | null = null;
   private isConfigured = false;
-  private authUrl: string | null = null;
 
   constructor() {
     this.initialize();
@@ -32,87 +29,28 @@ class GoogleDocsService {
 
   private initialize() {
     try {
-      const credentialsPath = process.env.GOOGLE_OAUTH_CREDENTIALS_PATH;
-      const tokenPath = process.env.GOOGLE_OAUTH_TOKEN_PATH || './google-docs-token.json';
+      const serviceAccountPath = process.env.GOOGLE_SERVICE_ACCOUNT_PATH;
       
-      if (!credentialsPath) {
-        logger.warn("Google Docs service not configured: GOOGLE_OAUTH_CREDENTIALS_PATH not set");
+      if (!serviceAccountPath) {
+        logger.warn("Google Docs service not configured: GOOGLE_SERVICE_ACCOUNT_PATH not set");
         return;
       }
 
-      // Read OAuth2 credentials
-      const credentials = JSON.parse(readFileSync(credentialsPath, 'utf8'));
-      const { client_id, client_secret } = credentials.installed || credentials.web;
+      const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
+      
+      const auth = new google.auth.GoogleAuth({
+        credentials: serviceAccount,
+        scopes: [
+          'https://www.googleapis.com/auth/documents',
+          'https://www.googleapis.com/auth/drive',
+        ],
+      });
 
-      // Construct redirect URI using Replit domain
-      const redirectUri = process.env.REPLIT_DEV_DOMAIN 
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}/api/google-docs/callback`
-        : 'http://localhost:5000/api/google-docs/callback';
-
-      // Create OAuth2 client
-      this.oauth2Client = new google.auth.OAuth2(
-        client_id,
-        client_secret,
-        redirectUri
-      );
-
-      // Check if we have a stored token
-      if (existsSync(tokenPath)) {
-        const token = JSON.parse(readFileSync(tokenPath, 'utf8'));
-        this.oauth2Client.setCredentials(token);
-        
-        // Set up automatic token refresh
-        this.oauth2Client.on('tokens', (tokens) => {
-          try {
-            let currentTokens: any = {};
-            
-            // Try to read existing tokens, but don't fail if file doesn't exist
-            if (existsSync(tokenPath)) {
-              try {
-                currentTokens = JSON.parse(readFileSync(tokenPath, 'utf8'));
-              } catch (parseError) {
-                logger.warn("Failed to parse existing token file, will overwrite", { error: parseError });
-              }
-            }
-            
-            // Update tokens
-            if (tokens.refresh_token) {
-              currentTokens.refresh_token = tokens.refresh_token;
-            }
-            currentTokens.access_token = tokens.access_token;
-            if (tokens.expiry_date) {
-              currentTokens.expiry_date = tokens.expiry_date;
-            }
-            
-            // Write updated tokens
-            writeFileSync(tokenPath, JSON.stringify(currentTokens, null, 2));
-            logger.info("OAuth tokens refreshed successfully");
-          } catch (error) {
-            logger.error("Failed to update OAuth tokens", { error });
-          }
-        });
-
-        this.docs = google.docs({ version: 'v1', auth: this.oauth2Client });
-        this.drive = google.drive({ version: 'v3', auth: this.oauth2Client });
-        this.isConfigured = true;
-        
-        logger.info("Google Docs service initialized with OAuth2");
-      } else {
-        // Generate authorization URL for first-time setup
-        this.authUrl = this.oauth2Client.generateAuthUrl({
-          access_type: 'offline',
-          scope: [
-            'https://www.googleapis.com/auth/documents',
-            'https://www.googleapis.com/auth/drive.file',
-          ],
-        });
-        
-        logger.warn("Google Docs OAuth not authorized. Please visit the authorization URL.", {
-          authUrl: this.authUrl,
-          tokenPath
-        });
-        logger.warn(`Authorization URL: ${this.authUrl}`);
-      }
+      this.docs = google.docs({ version: 'v1', auth });
+      this.drive = google.drive({ version: 'v3', auth });
+      this.isConfigured = true;
+      
+      logger.info("Google Docs service initialized successfully");
     } catch (error) {
       logger.error("Failed to initialize Google Docs service", { error });
       this.isConfigured = false;
@@ -120,54 +58,11 @@ class GoogleDocsService {
   }
 
   /**
-   * Complete OAuth authorization with the code from the redirect
-   */
-  async authorize(code: string): Promise<void> {
-    if (!this.oauth2Client) {
-      throw new Error("OAuth client not initialized");
-    }
-
-    const tokenPath = process.env.GOOGLE_OAUTH_TOKEN_PATH || './google-docs-token.json';
-
-    try {
-      const { tokens } = await this.oauth2Client.getToken(code);
-      this.oauth2Client.setCredentials(tokens);
-      
-      // Save tokens to file
-      writeFileSync(tokenPath, JSON.stringify(tokens, null, 2));
-      
-      this.docs = google.docs({ version: 'v1', auth: this.oauth2Client });
-      this.drive = google.drive({ version: 'v3', auth: this.oauth2Client });
-      this.isConfigured = true;
-      this.authUrl = null; // Clear the auth URL after successful authorization
-      
-      logger.info("Google Docs OAuth authorization successful");
-    } catch (error) {
-      logger.error("Failed to complete OAuth authorization", { error });
-      throw error;
-    }
-  }
-
-  /**
-   * Get the OAuth authorization URL (if not yet authorized)
-   */
-  getAuthUrl(): string | null {
-    return this.authUrl;
-  }
-
-  /**
-   * Check if the service is configured and authorized
-   */
-  isAuthorized(): boolean {
-    return this.isConfigured;
-  }
-
-  /**
    * Create a new Google Doc for a job with structured scope information
    */
   async createJobDocument(jobId: string, jobData: JobDocumentData): Promise<DocumentResult> {
     if (!this.isConfigured || !this.docs || !this.drive) {
-      throw new Error("Google Docs service not configured or not authorized");
+      throw new Error("Google Docs service not configured");
     }
 
     try {
@@ -187,7 +82,7 @@ class GoogleDocsService {
       const docId = createResponse.data.documentId!;
       const docUrl = `https://docs.google.com/document/d/${docId}/edit`;
 
-      // Move document to the specified folder (optional)
+      // Move document to the specified folder
       const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
       if (folderId) {
         await this.drive.files.update({
