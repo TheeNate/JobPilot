@@ -1,0 +1,226 @@
+# Replit Implementation: Intelligent Staffing with Enhanced UI
+
+## Project Context
+Enhance the existing scheduler-core dashboard with intelligent Claude AI-powered technician matching. The system currently shows basic job data and needs expandable rows that display AI-analyzed staffing recommendations.
+
+## Current System Status
+- **Airtable Integration**: ✅ Working - retrieves technician data successfully
+- **Job Display**: ✅ Working - shows jobs in table format with actions (trash/person icons)
+- **Basic Matching**: ✅ Working - returns 50% baseline scores
+- **Missing**: Claude AI intelligence and expandable UI for detailed analysis
+
+## UI Enhancement Requirements
+
+Based on the current dashboard screenshot showing job table with columns: Timestamp, Client Email, Location, Date, Time, Job Type, Techs, Proposed Staffing, Status, Actions.
+
+### Target UI Behavior:
+1. **Add dropdown button** in Actions column (next to person and trash icons)
+2. **Expandable row** that pushes other rows down when opened
+3. **Detailed AI analysis panel** showing intelligent staffing recommendations
+4. **Smooth animations** for expand/collapse transitions
+
+## Implementation Requirements
+
+### Phase 1: Fix Certification Data Access
+
+**File**: `server/services/airtable.ts`
+
+**Problem**: Currently only requests `["Name", "Status"]` fields, but certification data exists as `"Technician Certifications"` array.
+
+**Fix**: Update the fields array in `getActiveTechnicians()` method:
+```typescript
+const fields = ["Name", "Status", "Technician Certifications"];
+```
+
+### Phase 2: Create Claude AI Matching Service
+
+**File**: `server/services/claude-matching.ts` (new file)
+
+**Purpose**: Intelligent technician-job matching using Claude API
+
+**Key Functions**:
+- `analyzeJobRequirements(jobDetails)` - Extract skills/requirements from job description
+- `rankTechnicians(jobDetails, availableTechnicians)` - Get AI-powered rankings with reasoning
+- `generateMatchAnalysis(job, technicians)` - Complete analysis with explanations
+
+**API Integration**: Use existing Claude API patterns from intake-api for consistency
+
+**Response Format**:
+```typescript
+interface MatchAnalysis {
+  topRecommendation: {
+    technician: TechnicianData,
+    confidenceScore: number,
+    reasoning: string[]
+  },
+  alternatives: AlternativeTechnician[],
+  jobComplexity: "simple" | "moderate" | "complex",
+  requiredSkills: string[],
+  recommendations: string[]
+}
+```
+
+### Phase 3: Enhanced Matching Logic
+
+**File**: `server/services/airtable.ts`
+
+**Modify**: `calculateMatchScore()` method
+
+**Current Logic**: Returns hardcoded 50% baseline
+**New Logic**: 
+1. Try Claude AI analysis first
+2. Fall back to enhanced logic-based scoring if API unavailable
+3. Include certification matching, availability weighting, job complexity factors
+
+**Enhanced Logic Rules** (for fallback):
+- Exact certification matches: +30 points
+- Category matches (UT job → UT cert): +25 points
+- Multiple skill alignment: +20 points
+- Long-term availability: +10 points
+- Recent availability: +5 points
+
+### Phase 4: Frontend Expandable Row Implementation
+
+**Target Files**: Job table component (likely in `client/src/components/`)
+
+**UI Components to Add**:
+
+**1. Dropdown Toggle Button**
+- Position: Actions column, between person and trash icons
+- Icon: Chevron down/up or details icon
+- State: Tracks expanded/collapsed per job row
+- Animation: Smooth rotation on state change
+
+**2. Expandable Row Content**
+- Layout: Full-width panel below job row when expanded
+- Content: Detailed AI analysis and technician recommendations
+- Animation: Slide down/up with smooth height transition
+- Behavior: Pushes all rows below down when expanded
+
+**3. AI Analysis Display Panel**
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 🤖 AI Analysis for UT Sweep Job                           │
+├─────────────────────────────────────────────────────────────┤
+│ Top Recommendation: Nate N (85% match)                     │
+│ ✓ UT Level II certified ✓ Rope access qualified            │
+│ ✓ Available Dec 7-30   ✓ Located nearby                   │
+│                                                             │
+│ Alternative Options:                                        │
+│ • Micheal E (70% match) - Strong UT skills, limited avail  │
+│ • tim T (45% match) - Rope certified, no UT experience     │
+│                                                             │
+│ Job Complexity: Moderate                                    │
+│ Required Skills: UT Level II, Visual Inspection, Rope Work │
+│ Recommendation: Assign Nate N with Micheal E as backup     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**4. Implementation Strategy**
+- Use React state to track expanded rows (Map or Set of job IDs)
+- CSS transitions for smooth expand/collapse animations
+- Conditional rendering for analysis panel content
+- Loading states while fetching Claude analysis
+- Error handling for API failures with fallback content
+
+### Phase 5: Backend API Enhancement
+
+**File**: `server/routes.ts`
+
+**Enhance**: `/api/jobs/:jobId/match-technicians` endpoint
+
+**Current Behavior**: Returns basic technician matches
+**New Behavior**: 
+1. Get technician data with full certifications
+2. Call Claude AI analysis service
+3. Return enhanced analysis with reasoning
+4. Cache results for performance
+
+**Response Enhancement**:
+```typescript
+{
+  status: "success",
+  data: {
+    jobId: string,
+    aiAnalysis: {
+      topRecommendation: {
+        technician: TechnicianDetails,
+        confidenceScore: number,
+        reasoning: string[],
+        availabilityStatus: string
+      },
+      alternatives: AlternativeTechnician[],
+      jobAnalysis: {
+        complexity: "simple" | "moderate" | "complex",
+        requiredSkills: string[],
+        estimatedDuration: string,
+        recommendations: string[]
+      },
+      analysisTimestamp: string,
+      fallbackUsed: boolean
+    }
+  }
+}
+```
+
+## Implementation Priority Order
+
+### Phase 1 (Immediate): Data Access Fix
+1. Update Airtable field requests to include certifications
+2. Verify certification data flows through to frontend
+3. Test that technician data includes skill arrays
+
+### Phase 2 (Core): Claude AI Service
+1. Create Claude matching service with job analysis
+2. Implement intelligent ranking with reasoning
+3. Add fallback logic for API unavailability
+4. Test AI analysis quality and response times
+
+### Phase 3 (UI): Expandable Row Implementation  
+1. Add dropdown toggle button to Actions column
+2. Implement expandable row state management
+3. Create AI analysis display panel component
+4. Add smooth animations and loading states
+
+### Phase 4 (Integration): Full System Test
+1. Test complete flow: Job creation → AI analysis → UI display
+2. Verify performance with multiple expanded rows
+3. Test error handling and fallback scenarios
+4. Validate mobile responsiveness
+
+## Expected User Experience Flow
+
+1. **Job appears** in table with basic match info (e.g., "Nate N (50% match)")
+2. **User clicks dropdown** in Actions column to see detailed analysis
+3. **Row expands** smoothly, showing AI-powered breakdown:
+   - Why this technician was recommended
+   - Alternative options with explanations
+   - Job complexity assessment
+   - Required skills analysis
+   - Specific recommendations
+4. **User can collapse** row to return to table view
+5. **Multiple rows** can be expanded simultaneously for comparison
+
+## Technical Requirements
+
+**Performance**: 
+- Claude API calls should complete within 3 seconds
+- UI animations should be smooth (60fps)
+- Expanded rows should not impact table scrolling performance
+
+**Reliability**:
+- Graceful degradation when Claude API unavailable
+- Fallback to enhanced logic-based matching
+- Clear error messages for failed analysis
+
+**Accessibility**:
+- Keyboard navigation for dropdown controls
+- Screen reader support for expanded content
+- Appropriate ARIA labels and roles
+
+**Mobile Responsive**:
+- Expandable rows should work on mobile devices
+- Analysis panel should be readable on smaller screens
+- Touch-friendly dropdown controls
+
+This implementation will transform the basic 50% match scores into intelligent, explainable staffing recommendations that provide real business value for scheduling decisions.

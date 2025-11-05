@@ -1,0 +1,149 @@
+# Replit Debug Prompt: Airtable API Request Issue
+
+## Problem Description
+
+Our scheduler-core application has an Airtable integration that's experiencing a specific issue:
+
+**Working**: Direct curl commands to Airtable API return correct data
+**Broken**: App's internal API requests get HTTP 422 "Unprocessable Entity" errors
+
+**Evidence of the Issue:**
+
+1. **Successful curl test**:
+```bash
+curl "https://api.airtable.com/v0/appkNlYbSt9EWFcnD/Technicians?filterByFormula=%7BStatus%7D%20%3D%20%27Active%27" 
+# Returns 3 active technicians successfully
+```
+
+2. **App logs showing 422 errors**:
+```
+[DEBUG] Table 'Technicians' not found or accessible, trying next... { error: 'Airtable API error 422: Unknown error' }
+[WARN] No accessible technician table found. Tried: Technicians, Employees, Staff, Workers, Team Members.
+```
+
+3. **App endpoints returning empty results**:
+- `/api/technicians/available?date=2024-09-22` returns `{"data":[]}`
+- `/api/airtable/health` returns healthy status
+- The base ID and API key are definitely correct
+
+## Root Cause Analysis
+
+The issue is likely in the `makeRequest` function in `server/services/airtable.ts`. The app is constructing API requests differently than the working curl command, causing Airtable to return 422 errors instead of data.
+
+Possible causes:
+1. **URL encoding issues** - Filter formulas may be double-encoded or malformed
+2. **Parameter construction** - Query parameters may be built incorrectly
+3. **Header differences** - Request headers may differ from working curl
+4. **Rate limiting side effects** - The rate limiting logic may interfere with requests
+
+## Required Solution
+
+Add comprehensive debugging to the `makeRequest` function in `server/services/airtable.ts` to capture:
+
+### 1. Pre-Request Debugging
+Before the fetch call, log:
+- Complete constructed URL with all parameters
+- All query parameters (raw and encoded)
+- Request headers being sent
+- Filter formula (both original and URL-encoded versions)
+- Endpoint being called
+- Base URL construction
+
+### 2. Response Debugging  
+After the fetch call, log:
+- Response status code
+- Response headers
+- Raw response body (for errors)
+- Request timing information
+- Rate limiter state
+
+### 3. Error Context Debugging
+For 422 errors specifically, log:
+- Exact error response from Airtable
+- Comparison with expected URL format
+- Parameter validation results
+- Suggestions for fixing common 422 causes
+
+### 4. Success Path Debugging
+For successful requests, log:
+- Record count returned
+- First record structure (for validation)
+- Request performance metrics
+
+## Implementation Requirements
+
+**Use the existing logger system** (`logger.info`, `logger.debug`, `logger.error`) not console.log statements.
+
+**Add debugging at these specific points in makeRequest**:
+
+```typescript
+private async makeRequest<T = any>(
+  endpoint: string,
+  params: Record<string, any> = {},
+): Promise<AirtableResponse<T>> {
+  // 1. LOG RATE LIMITER STATE HERE
+  
+  await this.enforceRateLimit();
+  const url = new URL(this.baseUrl + endpoint);
+  
+  // 2. LOG URL CONSTRUCTION HERE
+  
+  // Add query parameters
+  Object.entries(params).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach((v) => url.searchParams.append(key, v));
+    } else if (value !== undefined) {
+      url.searchParams.append(key, String(value));
+    }
+  });
+
+  // 3. LOG COMPLETE REQUEST DETAILS HERE
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${this.apiKey}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  // 4. LOG RESPONSE DETAILS HERE
+  
+  this.rateLimiter.requests++;
+
+  if (response.status === 429) {
+    // 5. LOG RATE LIMIT DETAILS HERE
+  }
+
+  if (!response.ok) {
+    // 6. LOG DETAILED ERROR INFO HERE (especially for 422)
+    const error = await response.json().catch(() => ({ message: "Unknown error" }));
+    throw new Error(`Airtable API error ${response.status}: ${error.message || "Unknown error"}`);
+  }
+
+  // 7. LOG SUCCESS DETAILS HERE
+}
+```
+
+## Expected Outcome
+
+After implementing this debugging, when we hit `/api/technicians/available?date=2024-09-22`, the logs should show:
+
+1. Exact URL being constructed by the app
+2. How it differs from the working curl command  
+3. Why Airtable returns 422 instead of data
+4. Clear path to fix the URL construction issue
+
+The debugging should be detailed enough that we can see exactly why:
+- `curl "https://api.airtable.com/v0/appkNlYbSt9EWFcnD/Technicians?filterByFormula=%7BStatus%7D%20%3D%20%27Active%27"` works
+- But the app's equivalent request fails with 422
+
+## Context
+
+This is part of a business operations intelligence platform where:
+- Email intake creates jobs automatically
+- Airtable stores technician availability and certifications  
+- The system should automatically match available technicians to jobs
+- Currently the matching fails because technician data can't be retrieved
+
+The Airtable integration is the final piece needed for full automation of the job-to-technician matching workflow.

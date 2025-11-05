@@ -1,0 +1,291 @@
+# Comprehensive Replit Implementation Prompt: Airtable Integration for Scheduler-Core
+
+## Project Context
+You are enhancing an existing Express.js + TypeScript backend service called **scheduler-core** that currently processes job requests from email intake. The system architecture is:
+
+**Current Flow:** `Email → Mailgun → intake-api → [Claude AI Analysis] → scheduler-core → PostgreSQL → Dashboard`
+
+**Goal:** Add intelligent technician matching by integrating with Airtable databases that store technician availability and certification data.
+
+## Current System Architecture
+
+### Backend Stack
+- **Express.js** with TypeScript
+- **Drizzle ORM** with **Neon PostgreSQL**  
+- **Zod** validation schemas
+- **RESTful API** design with modular architecture
+- Existing endpoints: `/api/health`, `/api/jobs`, `/api/logs`, `/api/stats`
+
+### Database Schema (PostgreSQL)
+- `jobs` table: id, clientEmail, location, scheduledDate, scheduledTime, jobType, techsNeeded, status, parsedData, createdAt, updatedAt
+- `employees` table: id, name, email, phone, skills, status, createdAt (currently unused)
+- `job_assignments` table: id, jobId, employeeId, assignedAt (future use)
+- `request_logs` table: for API monitoring
+
+### Frontend
+- React 18 + TypeScript dashboard
+- TanStack Query for API state management
+- Real-time job display with 5-second refresh intervals
+
+## Integration Requirements
+
+### Phase 1: Airtable Connection Infrastructure
+
+**Environment Configuration:**
+- Add environment variables for Airtable integration:
+  - `AIRTABLE_API_KEY` - Personal access token for API authentication
+  - `AIRTABLE_BASE_ID` - Base identifier for the technician management base
+  - `AIRTABLE_RATE_LIMIT` - API rate limiting (default: 5 requests/second)
+
+**Service Module Creation:**
+- Create `server/services/airtable.ts` service module
+- Implement connection pooling and rate limiting for Airtable API calls
+- Add comprehensive error handling for network failures, API limits, and data validation
+- Include retry logic with exponential backoff for failed requests
+- Add request/response logging for debugging and monitoring
+
+**Health Check Integration:**
+- Extend existing `/api/health` endpoint to include Airtable connectivity status
+- Test connection to Airtable API and verify base access permissions
+- Report API quota usage and rate limit status
+- Include last successful connection timestamp and error details
+
+### Phase 2: Airtable Schema Integration
+
+**Target Airtable Structure:**
+The system will connect to two related Airtable tables:
+
+**Technicians Table:**
+- Table ID: `tbleofVdHES3orMTE` (use for API calls)
+- Fields: Name (primary), Employee ID, Certifications (multiple select), Status (single select: Active/Inactive)
+- API access via: `https://api.airtable.com/v0/{baseId}/Technicians` or `https://api.airtable.com/v0/{baseId}/tbleofVdHES3orMTE`
+
+**Availability Periods Table:**
+- Fields: Technician (link to Technicians), Period Type (Available/Unavailable/Booked), Start Date, End Date, Reason
+- API access via: `https://api.airtable.com/v0/{baseId}/Availability%20Periods`
+
+**Critical Airtable API Response Format:**
+```javascript
+// Standard Airtable API response structure
+{
+  "records": [
+    {
+      "id": "recXXXXXXXXXXXXXX", // Airtable record ID
+      "fields": {
+        "Name": "John Smith",
+        "Employee ID": "NDT001",
+        "Certifications": ["UT Level II", "OSHA 30"],
+        "Status": "Active"
+      },
+      "createdTime": "2024-01-15T10:30:00.000Z"
+    }
+  ],
+  "offset": "itrXXXXXXXXXXXXXX/recXXXXXXXXXXXXXX" // For pagination
+}
+```
+
+**Data Mapping Requirements:**
+- Handle Airtable's specific record structure (records[].fields format)
+- All data is nested under "fields" property in each record
+- Record IDs are in the top-level "id" property, not in fields
+- Linked records return as arrays of record IDs (e.g., ["rec123", "rec456"])
+- Empty fields are omitted entirely from the response
+- Handle pagination using "offset" parameter for large datasets
+- Multiple select fields return as arrays, single selects as strings
+- Date fields return as ISO 8601 strings ("2024-01-15")
+
+### Phase 3: Technician Availability Logic
+
+**Availability Query System:**
+- Implement date range queries to find technicians available for specific job dates
+- Logic: Query Availability Periods table for records where:
+  - Start Date <= Job Date <= End Date (or End Date is null for indefinite availability)
+  - Period Type = "Available"
+  - Linked Technician has Status = "Active"
+- Handle overlapping availability periods and period precedence rules
+- Return structured data with technician details and availability confidence
+
+**Certification Matching:**
+- Extract job requirements from existing job parsing (jobType field from intake-api)
+- Implement flexible matching logic:
+  - Exact certification matches (job requires "UT Level II" → technician has "UT Level II")
+  - Category matching (job mentions "ultrasonic" → match technicians with UT certifications)  
+  - Multiple requirement handling (job needs both UT and safety certifications)
+- Return match confidence scores (0-100%) based on requirement fulfillment
+
+**Performance Optimization:**
+- Implement caching for technician data with configurable TTL (default: 5 minutes)
+- Use Airtable's filtering and sorting parameters to reduce payload sizes
+- **CRITICAL**: Respect Airtable's 5 requests/second rate limit per base
+- Handle 429 rate limit responses with 30-second wait periods before retry
+- Use `filterByFormula` parameter for server-side filtering instead of fetching all records
+- Implement pagination handling for datasets >100 records (Airtable's default page size)
+- Add database caching for frequently accessed availability data
+- Use `fields` parameter to only fetch required fields and reduce payload size
+
+**Example Optimized Queries:**
+```javascript
+// Filter for available technicians on specific date
+const filterFormula = `AND(
+  {Status} = 'Active',
+  OR(
+    AND({Period Type} = 'Available', {Start Date} <= '2024-01-15', OR({End Date} >= '2024-01-15', {End Date} = BLANK())),
+    {Period Type} = BLANK()
+  )
+)`;
+
+// Use fields parameter to reduce payload
+const fields = ['Name', 'Employee ID', 'Certifications', 'Status'];
+```
+
+### Phase 4: Intelligent Matching Enhancement (Claude AI Integration)
+
+**Hybrid Matching Strategy:**
+1. **Basic Filtering** (Pure Logic): Use direct queries to eliminate obviously unavailable technicians
+2. **Intelligent Ranking** (Claude API): Use AI for nuanced matching and prioritization
+
+**Claude API Integration Points:**
+- Extend existing Claude API service from intake-api or create new service module
+- Send available technician list + job requirements to Claude for intelligent analysis
+- Request structured JSON response with ranked technician matches and reasoning
+- Handle API failures gracefully by falling back to basic logic-only matching
+
+**Claude Prompt Structure:**
+```
+Job Requirements: [parsed job details]
+Available Technicians: [list with certifications and availability]
+Task: Rank technicians by suitability, provide confidence scores, identify gaps
+Response Format: JSON with ranked matches, reasoning, and scheduling recommendations
+```
+
+### Phase 5: Database Schema Extensions
+
+**New Tables (PostgreSQL):**
+- `airtable_connections` table: id, name, baseId, apiKeyHash, status, lastSync, createdAt, updatedAt
+- `technician_matches` table: id, jobId, airtableRecordId, matchConfidence, reasoning, createdAt
+- `sync_logs` table: id, connectionId, syncType, recordsProcessed, errors, duration, createdAt
+
+**Existing Table Modifications:**
+- Add `proposedStaffing` JSON field to `jobs` table for storing match results
+- Add `staffingStatus` enum field: pending, proposed, confirmed, failed
+- Add `lastStaffingAttempt` timestamp for retry logic
+
+### Phase 6: API Endpoint Development
+
+**New Endpoints:**
+
+**`GET /api/technicians/available`**
+- Query parameters: date (required), jobType (optional), limit (default: 10)
+- Returns: Array of available technicians with match confidence scores
+- Includes: name, certifications, availability periods, contact info, match reasoning
+
+**`POST /api/jobs/:id/match-technicians`**  
+- Body: { jobId, requirementOverrides?, forceRefresh? }
+- Triggers: Complete matching process for specific job
+- Returns: Proposed staffing with ranked technician matches and confidence scores
+
+**`GET /api/airtable/health`**
+- Returns: Detailed Airtable connection status, API quota usage, last sync timestamps
+- Includes: Base accessibility, table structure validation, rate limit status
+
+**`POST /api/airtable/sync`**
+- Triggers: Manual data synchronization from Airtable
+- Returns: Sync results with record counts, errors, and performance metrics
+
+### Phase 7: Frontend Dashboard Integration
+
+**Jobs Table Enhancement:**
+- Add new column: "Proposed Staffing" between existing Status and Actions columns
+- Implement expandable dropdown with hamburger menu icon
+- Display: Ranked technician matches with confidence scores and reasoning
+- Include: Loading states, error handling, and manual refresh capability
+
+**New Dashboard Tab: "Technicians"**
+- Real-time view of technician availability from Airtable
+- Filtering by: availability status, certification type, date range
+- Display: Current status, upcoming unavailability, certification expiry dates
+- Actions: Manual availability updates, direct Airtable base access links
+
+**System Status Integration:**
+- Add Airtable connection status to existing dashboard health monitoring
+- Display: API quota usage, sync status, connection health indicators
+- Alerts: API rate limit warnings, sync failures, data validation errors
+
+### Phase 8: Error Handling and Resilience
+
+**Graceful Degradation:**
+- System continues functioning if Airtable is unavailable
+- Fallback to "manual staffing required" status for jobs when API fails
+- Cache last known technician data to provide limited matching capability during outages
+
+**Comprehensive Logging:**
+- Log all Airtable API interactions with request/response details
+- Track matching decisions and confidence score calculations
+- Monitor API quota usage and rate limit adherence
+- Alert on repeated failures or data inconsistencies
+
+**Data Validation:**
+- Validate Airtable data structure matches expected schema on each sync
+- Handle missing fields, unexpected data types, and schema changes gracefully
+- Provide clear error messages for configuration and connectivity issues
+
+### Phase 9: Configuration and Deployment
+
+**Environment Variables Required:**
+```
+AIRTABLE_API_KEY=pat_xxxxxxxxxxxxxxxxxx  # Personal access token
+AIRTABLE_BASE_ID=appkNlYbSt9EWFcnD       # Your specific base ID
+AIRTABLE_SYNC_INTERVAL=300000            # 5 minutes in milliseconds
+AIRTABLE_CACHE_TTL=300                   # 5 minutes cache TTL
+AIRTABLE_RATE_LIMIT_RPM=300              # 5 requests/second = 300/minute
+CLAUDE_API_KEY=sk-ant-xxx                # Existing variable
+```
+
+**Configuration Validation:**
+- Startup checks for required environment variables
+- Test Airtable connectivity and permissions on service initialization
+- Validate base structure matches expected schema
+- Provide clear error messages for misconfiguration
+
+## Expected System Behavior
+
+### Job Processing Flow Enhancement:
+1. **Job Intake** (Existing): Email → intake-api → Claude AI → scheduler-core creates job record
+2. **Auto-Matching** (New): Newly created job triggers automatic technician matching
+3. **Availability Query** (New): Query Airtable for technicians available on job date
+4. **Intelligent Ranking** (New): Claude AI ranks available technicians by suitability
+5. **Dashboard Display** (Enhanced): Job row shows proposed staffing with confidence scores
+
+### Performance Targets:
+- **Response Time**: Technician matching queries complete within 3 seconds
+- **Availability**: 99% uptime with graceful degradation during Airtable outages  
+- **Accuracy**: 90%+ technician match confidence for jobs with clear requirements
+- **Scalability**: Handle 100+ concurrent jobs with efficient API usage
+
+### Success Metrics:
+- Jobs automatically receive technician proposals within 30 seconds of creation
+- Dashboard clearly displays staffing options with actionable confidence indicators
+- System maintains performance under typical business email volume (50+ jobs/day)
+- Administrative overhead reduced through automated matching vs manual scheduling
+
+## Implementation Notes
+
+**Code Organization:**
+- Follow existing project structure with modular service separation
+- Use established patterns for error handling, logging, and API responses
+- Maintain TypeScript strict mode compliance throughout
+- Follow existing naming conventions and code style
+
+**Testing Strategy:**
+- Include comprehensive error simulation (API failures, invalid data, rate limits)
+- Test with realistic Airtable data volumes and structure variations
+- Validate matching logic with edge cases (no available technicians, conflicting requirements)
+- Performance testing with concurrent job processing loads
+
+**Documentation Requirements:**
+- Update API documentation with new endpoints and response schemas
+- Include Airtable setup guide for new business onboarding
+- Document matching logic and confidence score calculation methodology
+- Provide troubleshooting guide for common integration issues
+
+This implementation transforms scheduler-core from a simple job intake system into an intelligent coordination platform capable of automated technician matching while maintaining reliability and performance standards.

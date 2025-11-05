@@ -1,0 +1,345 @@
+# Replit Implementation: Team-Based Technician Matching Enhancement
+
+## Problem Statement
+
+The current technician matching system has a fundamental mismatch between job requirements and staffing suggestions:
+
+**Current Behavior:**
+- Job parsing correctly identifies "2 techs needed"
+- AI analysis shows individual technician alternatives instead of team compositions
+- UI displays: "Top Recommendation: Micheal E" + "Alternative Options: Individual technicians"
+
+**Required Behavior:**
+- Job requires 2 techs → Show 2-person team composition with roles
+- Job requires 3 techs → Show 3-person team composition with roles
+- Job requires 1 tech → Show individual recommendation (current behavior is fine)
+
+## Current System Analysis
+
+Based on the existing `server/services/claude-matching.ts`, the system:
+- Correctly asks Claude for team-based analysis
+- Receives individual technician rankings
+- Processes results as individual alternatives instead of building teams
+
+## Required Changes
+
+### Phase 1: Enhanced System Prompt
+
+**File**: `server/services/claude-matching.ts`
+
+**Current**: Uses only user messages without system context
+**New**: Add comprehensive system prompt with strategic team building guidance
+
+**System Prompt**:
+```
+You are an expert industrial scheduling coordinator who matches qualified technicians to job requirements. You understand NDT certifications, safety requirements, team dynamics, and operational considerations.
+
+Your job is to analyze job requests and build appropriately skilled teams. Consider all required skills and certifications, then suggest a team lead and supporting members.
+
+Team composition principles:
+- Ensure all critical job requirements are covered by qualified personnel
+- Assign most experienced technician as team lead when multiple certifications overlap
+- Build competent teams without over-staffing high-skill technicians on routine work
+- Maintain skill redundancy for safety-critical operations (RT, confined space, rope access)
+- Reserve your most versatile technicians for complex jobs requiring multiple certifications
+- Use this as an opportunity to pair experienced leads with developing technicians when job complexity allows
+
+Balance efficiency with capability: staff jobs appropriately without depleting your skilled workforce for future complex assignments.
+```
+
+### Phase 2: Team-Based Response Structure
+
+**Current Response Format** (individual rankings):
+```typescript
+[
+  {
+    "name": "Technician Name",
+    "confidenceScore": 0-100,
+    "role": "Lead" | "Specialist" | "Support",
+    "reasoning": ["reason1", "reason2"]
+  }
+]
+```
+
+**New Response Format** (team-based):
+```typescript
+{
+  "recommendedTeam": {
+    "size": number,
+    "members": [
+      {
+        "name": "Technician Name",
+        "role": "Lead" | "Specialist" | "Support",
+        "confidenceScore": 0-100,
+        "reasoning": ["reason1", "reason2"],
+        "availabilityStatus": "Excellent" | "Good" | "Limited"
+      }
+    ],
+    "teamDynamics": "Why this combination works well together",
+    "coordinationPlan": "Team leadership and coordination recommendations"
+  },
+  "alternativeTeams": [
+    {
+      "size": number,
+      "members": [...same structure...],
+      "teamReasoning": "Why this alternative team would work"
+    }
+  ],
+  "jobAnalysis": {
+    "complexity": "simple" | "moderate" | "complex",
+    "requiredSkills": ["skill1", "skill2"],
+    "estimatedDuration": "6-8 hours",
+    "recommendations": ["rec1", "rec2"]
+  }
+}
+```
+
+### Phase 3: Updated Claude Integration
+
+**Modify API Call Structure**:
+```typescript
+// Current
+body: JSON.stringify({
+  model: 'claude-3-5-sonnet-20241022',
+  max_tokens: 2000,
+  messages: [{
+    role: 'user',
+    content: prompt
+  }]
+})
+
+// New
+body: JSON.stringify({
+  model: 'claude-3-5-sonnet-20241022',
+  max_tokens: 2000,
+  system: "You are an expert industrial scheduling coordinator...", // Add system prompt
+  messages: [{
+    role: 'user',
+    content: teamBasedPrompt // Modified prompt for team output
+  }]
+})
+```
+
+**New Team-Based Prompt Logic**:
+```typescript
+const teamBasedPrompt = `
+Analyze this job and recommend ${jobDetails.techsNeeded || 1} technician(s):
+
+Job Details:
+- Type: ${jobDetails.jobType}
+- Location: ${jobDetails.location}
+- Date/Time: ${jobDetails.scheduledDate} at ${jobDetails.scheduledTime}
+- Technicians Required: ${jobDetails.techsNeeded || 1}
+- Description: ${jobDetails.bodyPlain}
+
+Available Technicians:
+${techniciansData.map(t => `
+- ${t.name}: ${t.certifications.join(', ')}
+  Status: ${t.status}
+  Availability: ${t.availability.map(a => a.periodType).join(', ')}
+`).join('')}
+
+${Number(jobDetails.techsNeeded) > 1 ? 
+  `Build a ${jobDetails.techsNeeded}-person team with appropriate roles and explain why this combination works.` :
+  `Recommend the best individual technician and provide 2-3 alternatives.`}
+
+Return JSON in this exact format:
+{
+  "recommendedTeam": {
+    "size": ${jobDetails.techsNeeded || 1},
+    "members": [
+      {
+        "name": "Exact technician name",
+        "role": "Lead|Specialist|Support",
+        "confidenceScore": 85,
+        "reasoning": ["specific reason 1", "specific reason 2"],
+        "availabilityStatus": "Excellent"
+      }
+    ],
+    "teamDynamics": "Team coordination explanation",
+    "coordinationPlan": "Leadership structure"
+  },
+  "alternativeTeams": [
+    {
+      "size": ${jobDetails.techsNeeded || 1},
+      "members": [...],
+      "teamReasoning": "Why this alternative works"
+    }
+  ]
+}
+`;
+```
+
+### Phase 4: Response Processing Logic
+
+**Update the ranking function to build teams instead of individual rankings**:
+
+```typescript
+// Current logic: Process individual rankings
+const rankings = JSON.parse(content.text);
+return rankings.map(ranking => /* individual processing */);
+
+// New logic: Process team-based response
+const teamResponse = JSON.parse(content.text);
+
+// Validate team size matches job requirements
+if (teamResponse.recommendedTeam.size !== Number(jobDetails.techsNeeded || 1)) {
+  logger.warn("Team size mismatch", {
+    requested: jobDetails.techsNeeded,
+    recommended: teamResponse.recommendedTeam.size
+  });
+}
+
+// Return team-based analysis
+return {
+  teamComposition: teamResponse.recommendedTeam,
+  alternatives: teamResponse.alternativeTeams || [],
+  jobAnalysis: teamResponse.jobAnalysis || this.fallbackJobAnalysis(jobDetails)
+};
+```
+
+### Phase 5: UI Display Enhancement
+
+**Current UI Shows**:
+```
+Top Recommendation: Micheal E (90% match)
+Alternative Options:
+- Nate N (80% match)
+- bob b (80% match)
+- tim T (50% match)
+```
+
+**New UI Should Show**:
+
+**For 1-tech job:**
+```
+Recommended: Micheal E (90% match)
+Role: Solo Technician
+Reasoning: UT Level II certified, rope access qualified
+
+Alternative Options:
+- Nate N (80% match): Strong UT background
+- bob b (80% match): Multi-certified backup
+```
+
+**For 2-tech job:**
+```
+Recommended Team (2 technicians):
+👤 Lead: Micheal E (90% match)
+   Role: Team Lead - UT specialist, equipment setup
+   
+👤 Support: Nate N (85% match) 
+   Role: Support - Safety oversight, backup UT
+
+Team Dynamics: Experienced lead with skilled support
+Coordination: Micheal leads setup, Nate handles safety/QC
+
+Alternative Team Options:
+Team 2: Nate N (Lead) + bob b (Support)
+- Good UT coverage, backup certifications
+```
+
+### Phase 6: TypeScript Interface Updates
+
+**Update interfaces to support team structures**:
+
+```typescript
+// Add to existing interfaces
+interface TeamComposition {
+  size: number;
+  members: TeamMember[];
+  teamDynamics?: string;
+  coordinationPlan?: string;
+}
+
+interface AlternativeTeam {
+  size: number;
+  members: TeamMember[];
+  teamReasoning: string;
+}
+
+// Update main MatchAnalysis interface
+interface MatchAnalysis {
+  teamComposition: TeamComposition;
+  alternatives: AlternativeTeam[];
+  jobAnalysis: JobAnalysis;
+  
+  // Maintain backward compatibility
+  topRecommendation: {
+    technician: TechnicianData;
+    confidenceScore: number;
+    reasoning: string[];
+  };
+}
+```
+
+### Phase 7: Error Handling and Validation
+
+**Add team size validation**:
+```typescript
+// Validate Claude response matches job requirements
+const validateTeamSize = (response: any, requiredSize: number) => {
+  if (response.recommendedTeam?.size !== requiredSize) {
+    logger.error("Team size validation failed", {
+      required: requiredSize,
+      received: response.recommendedTeam?.size
+    });
+    return false;
+  }
+  return true;
+};
+
+// Fallback team building if Claude fails
+const buildFallbackTeam = (technicians: TechnicianData[], size: number) => {
+  const sortedTechs = technicians
+    .sort((a, b) => (b.certifications?.length || 0) - (a.certifications?.length || 0))
+    .slice(0, size);
+    
+  return {
+    size,
+    members: sortedTechs.map((tech, index) => ({
+      name: tech.name,
+      role: index === 0 ? "Lead" : "Support",
+      confidenceScore: 70 - (index * 10),
+      reasoning: ["Fallback selection based on certification count"],
+      availabilityStatus: "Available"
+    })),
+    teamDynamics: "Basic team assignment (AI analysis unavailable)",
+    coordinationPlan: "Standard lead-support structure"
+  };
+};
+```
+
+## Implementation Priority
+
+### Phase 1: Claude Service Enhancement
+1. Add system prompt for strategic team building context
+2. Update prompt logic to request team-based responses
+3. Modify response parsing for team structures
+
+### Phase 2: Data Structure Updates
+1. Update TypeScript interfaces for team composition
+2. Add team size validation logic
+3. Implement fallback team building for API failures
+
+### Phase 3: UI Display Enhancement
+1. Modify expandable row component to show team composition
+2. Add role indicators and team coordination displays
+3. Handle both single-tech and multi-tech display formats
+
+### Phase 4: Testing and Validation
+1. Test with 1, 2, and 3+ technician job requirements
+2. Verify team recommendations match job complexity
+3. Validate fallback logic works when Claude API unavailable
+
+## Expected Results
+
+**Before**: Job needs 2 techs → Shows 1 recommendation + individual alternatives
+**After**: Job needs 2 techs → Shows 2-person team with roles + alternative team compositions
+
+**Test Scenarios**:
+- 1 tech visual inspection → Individual recommendation with alternatives
+- 2 tech UT sweep → Lead + Support team with coordination plan
+- 3 tech emergency RT → Lead + 2 specialists with equipment/safety roles
+
+This enhancement ensures staffing suggestions match actual job requirements and provide actionable team guidance for complex multi-technician jobs.

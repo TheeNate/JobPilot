@@ -1,0 +1,89 @@
+Build scheduler-core Backend Service for Email-Based Job Scheduler
+
+You're helping me build a backend microservice called scheduler-core. This is not a frontend project. It will run alongside another small API that already receives email webhooks from Mailgun and forwards the email data here as JSON.
+
+🧱 Purpose
+
+This service accepts email payloads (as JSON) from an upstream webhook. It will:
+
+Parse the email to extract job details (date, location, time, etc.)
+
+Store the parsed job info in a Postgres database
+
+Match the job with a qualified employee (based on availability)
+
+Send a reply email using the Mailgun API confirming the assignment
+
+We're starting with just parsing + DB insert. Reply logic and assignment logic will come later.
+
+📫 Input Payload (from webhook)
+
+Assume I’m sending a POST request with a payload like:
+
+{
+  "subject": "Job request: NDT needed at Chevron site",
+  "from": "dispatch@example.com",
+  "to": "schedule@mycompany.com",
+  "body-plain": "Hi, we need 2 techs at Chevron Refinery on Sept 23, 7:00am, for a rope access UT inspection. Let us know who's available."
+}
+
+🔧 Project Requirements
+
+Build a POST /job-intake endpoint
+
+Accepts JSON payload (like above)
+
+Logs it for now (no parsing logic yet)
+
+Set up a clean folder structure
+Suggested structure:
+
+/scheduler-core
+  ├── index.js              # App entrypoint
+  ├── routes/
+  │   └── jobIntake.js      # POST /job-intake logic
+  ├── services/
+  │   └── parser.js         # Will extract job fields from email
+  ├── db/
+  │   └── db.js             # Postgres connection config
+  └── utils/
+      └── logger.js         # Optional logging helper
+
+
+Set up PostgreSQL client (e.g. pg)
+
+Just connect to DB for now. Table schemas will come later.
+
+Use .env for config
+
+MAILGUN_API_KEY, DB_URL, etc.
+
+Keep things modular
+
+Use router files and service layers
+
+Don’t cram all logic into index.js
+
+Use Replit's environment
+
+Compatible with Replit hosting + .env secrets
+
+🧠 First Step Summary
+
+Start with:
+
+POST /job-intake
+
+Logs the payload
+
+Project folder structure
+
+Connected to a Postgres DB (Supabase URL env var)
+
+We'll wire up:
+
+🧠 Parsing logic next
+
+🗂️ DB schema after that
+
+📩 Mailgun reply after that
